@@ -108,3 +108,58 @@ export function getCharGlyph(ch) {
 export function getDefinedChars() {
   return Object.keys(FONT)
 }
+
+// Draw one 8x12 character cell on a canvas 2D context, scaled by `scale`.
+// `x` and `y` are top-left coordinates in canvas pixels (already multiplied by scale).
+//
+// Character code semantics:
+//   32-95 / 97-127: ASCII text (rendered green-on-black)
+//   96:             "blank space" sentinel (the playable empty cell — rendered black)
+//   128-255:        semigraphics color block (see decodeSemigraphic)
+//
+// `inverse` swaps fg/bg for text cells. Used by the score/best-score screens and
+// by lowercase character runs.
+export function drawCell(ctx, code, x, y, scale, inverse = false) {
+  const w = FONT_WIDTH * scale
+  const h = FONT_HEIGHT * scale
+
+  if (code >= 128) {
+    drawSemigraphic(ctx, code, x, y, scale)
+    return
+  }
+
+  const bg = inverse ? '#07ff00' : '#000000'
+  const fg = inverse ? '#000000' : '#07ff00'
+  ctx.fillStyle = bg
+  ctx.fillRect(x, y, w, h)
+
+  if (code === 32 || code === 96) return
+
+  const glyph = getCharGlyph(String.fromCharCode(code))
+  ctx.fillStyle = fg
+  for (let row = 0; row < FONT_HEIGHT; row++) {
+    const bits = glyph[row]
+    if (bits === 0) continue
+    for (let col = 0; col < FONT_WIDTH; col++) {
+      if (bits & (0x80 >> col)) {
+        ctx.fillRect(x + col * scale, y + row * scale, scale, scale)
+      }
+    }
+  }
+}
+
+function drawSemigraphic(ctx, code, x, y, scale) {
+  const decoded = decodeSemigraphic(code)
+  if (!decoded) return
+  const w = FONT_WIDTH * scale
+  const h = FONT_HEIGHT * scale
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(x, y, w, h)
+  ctx.fillStyle = decoded.color
+  const halfW = (FONT_WIDTH / 2) * scale
+  const halfH = (FONT_HEIGHT / 2) * scale
+  if (decoded.quadrants.tl) ctx.fillRect(x,         y,         halfW, halfH)
+  if (decoded.quadrants.tr) ctx.fillRect(x + halfW, y,         halfW, halfH)
+  if (decoded.quadrants.bl) ctx.fillRect(x,         y + halfH, halfW, halfH)
+  if (decoded.quadrants.br) ctx.fillRect(x + halfW, y + halfH, halfW, halfH)
+}

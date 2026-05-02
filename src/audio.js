@@ -163,6 +163,8 @@ export function createAudio() {
   let ac = null
   let masterGain = null
   let queueTime = 0
+  let suspended = false  // when true, play() is a no-op so a hidden tab can't queue
+                         // oscillators on a suspended context that would all fire on resume
 
   // Cross-PLAY-call running state. Mirrors CoCo PLAY's stateful behavior.
   let runningTempo = 60
@@ -184,12 +186,23 @@ export function createAudio() {
   }
 
   function resume() {
+    suspended = false
     ensureContext()
     if (ac.state === 'suspended') return ac.resume()
     return Promise.resolve()
   }
 
   function suspend() {
+    suspended = true
+    // Drop anything currently scheduled so it can't fire as a burst when the
+    // context resumes later.
+    if (ac) {
+      for (const osc of activeNodes) {
+        try { osc.stop(0) } catch {}
+      }
+      activeNodes.clear()
+      queueTime = ac.currentTime
+    }
     if (ac && ac.state === 'running') return ac.suspend()
     return Promise.resolve()
   }
@@ -221,6 +234,12 @@ export function createAudio() {
   }
 
   function play(playString) {
+    if (suspended) {
+      // No-op while the tab is hidden: don't schedule oscillators that would all
+      // fire as a burst when the context resumes. The Promise resolves immediately
+      // so the game loop continues at throttled-setTimeout pace.
+      return Promise.resolve()
+    }
     ensureContext()
     if (queueTime < ac.currentTime) queueTime = ac.currentTime
 

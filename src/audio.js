@@ -3,30 +3,36 @@
 // Supported tokens (case-insensitive, whitespace ignored):
 //   Tnnn         tempo (1-255)
 //   Onnn         octave (1-5)
-//   Vnnn         volume (1-31)
-//   V>           increment volume
-//   V<           decrement volume
-//   Lnnn         default note length (1, 2, 4, 8, 16, 32)
+//   Vnnn         volume (1-31), absolute
+//   V>           increment volume (relative; resolved by the synth against running state)
+//   V<           decrement volume (relative)
+//   Lnnn[.+]     default note length (1, 2, 4, 8, 16, 32) with optional trailing dots
 //   A-G          note in current octave; optional # or + (sharp), - (flat);
 //                optional inline length digits; trailing dots extend duration
-//   Pnnn         rest with length
+//   Pnnn[.+]     rest with optional length and dots
 //   Nnnn         note by chromatic number 1-12 within current octave
 //
-// Returns events in stream order. Synthesis interprets the running state
-// (tempo, octave, length, volume) implicitly from the order of events.
+// CoCo runtime quirks accommodated:
+//   - BASIC's STR$(N) prepends a space for non-negative integers, so PLAY strings
+//     built like "T255 O"+STR$(O)+"N"+STR$(N) resolve to "T255 O 1N 5". Whitespace
+//     between a token letter and its numeric argument is therefore skipped.
+//   - "L4..." carries the dot multiplier into the running default-length state so
+//     notes that follow without their own length/dots inherit the dotted default.
+//   - V> and V< emit relative-volume events; the synth tracks running volume across
+//     PLAY calls, matching the original PLAY's stateful behavior.
 export function parsePlayString(input) {
   const events = []
   const s = input
   let i = 0
-  let lastVolume = 15
+  let octave = 2
+  let length = 4
+  let lengthDots = 0
 
   function eof() { return i >= s.length }
-
-  function skipWhitespace() {
-    while (!eof() && /\s/.test(s[i])) i++
-  }
+  function skipWhitespace() { while (!eof() && /\s/.test(s[i])) i++ }
 
   function readNumber() {
+    skipWhitespace()
     let n = ''
     while (!eof() && /[0-9]/.test(s[i])) n += s[i++]
     return n.length ? parseInt(n, 10) : null
@@ -56,51 +62,44 @@ export function parsePlayString(input) {
       if (v !== null) events.push({ type: 'tempo', value: v })
     } else if (c === 'O') {
       const v = readNumber()
-      if (v !== null) events.push({ type: 'octave', value: v })
+      if (v !== null) { octave = v; events.push({ type: 'octave', value: v }) }
     } else if (c === 'L') {
       const v = readNumber()
-      if (v !== null) events.push({ type: 'length', value: v })
+      if (v !== null) {
+        length = v
+        lengthDots = readDots()
+        events.push({ type: 'length', value: v, dots: lengthDots })
+      }
     } else if (c === 'V') {
       skipWhitespace()
-      if (s[i] === '>') { i++; lastVolume++; events.push({ type: 'volume', value: lastVolume }) }
-      else if (s[i] === '<') { i++; lastVolume--; events.push({ type: 'volume', value: lastVolume }) }
+      if (s[i] === '>') { i++; events.push({ type: 'volume', relative: 1 }) }
+      else if (s[i] === '<') { i++; events.push({ type: 'volume', relative: -1 }) }
       else {
         const v = readNumber()
-        if (v !== null) { lastVolume = v; events.push({ type: 'volume', value: v }) }
+        if (v !== null) events.push({ type: 'volume', value: v })
       }
     } else if (c === 'P') {
-      const len = readNumber()
-      const dots = readDots()
-      events.push({ type: 'rest', length: len, dotMultiplier: dotMultiplier(dots) })
+      const ownLen = readNumber()
+      const ownDots = readDots()
+      const useLength = ownLen ?? length
+      const useDots = (ownLen !== null || ownDots > 0) ? ownDots : lengthDots
+      events.push({ type: 'rest', length: useLength, dotMultiplier: dotMultiplier(useDots) })
     } else if (c === 'N') {
       const num = readNumber()
-      events.push({ type: 'noteNumber', number: num, octave: null })
+      events.push({ type: 'noteNumber', number: num, octave })
     } else if (c >= 'A' && c <= 'G') {
       let accidental = 0
       if (s[i] === '#' || s[i] === '+') { accidental = 1; i++ }
       else if (s[i] === '-') { accidental = -1; i++ }
-      const len = readNumber()
-      const dots = readDots()
+      const ownLen = readNumber()
+      const ownDots = readDots()
+      const useLength = ownLen ?? length
+      const useDots = (ownLen !== null || ownDots > 0) ? ownDots : lengthDots
       events.push({
         type: 'note', name: c, accidental,
-        length: len, dotMultiplier: dotMultiplier(dots),
-        octave: null,
+        length: useLength, dotMultiplier: dotMultiplier(useDots),
+        octave,
       })
-    }
-  }
-
-  // Second pass: fill in running octave / length on notes from preceding state events.
-  let octave = 2, length = 4
-  for (const e of events) {
-    if (e.type === 'octave') octave = e.value
-    else if (e.type === 'length') length = e.value
-    else if (e.type === 'note') {
-      if (e.octave === null) e.octave = octave
-      if (e.length === null || e.length === undefined) e.length = length
-    } else if (e.type === 'rest') {
-      if (e.length === null || e.length === undefined) e.length = length
-    } else if (e.type === 'noteNumber') {
-      if (e.octave === null) e.octave = octave
     }
   }
 

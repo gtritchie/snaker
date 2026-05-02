@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Snaker</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: #000; color: #07ff00;
+      font-family: monospace;
+      overflow: hidden;
+      touch-action: none;
+    }
+    body { display: flex; align-items: center; justify-content: center; }
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="256" height="192"></canvas>
+  <script type="module">
+    import { boot } from './src/main.js'
+    boot(document.getElementById('game'))
+  </script>
+</body>
+</html>

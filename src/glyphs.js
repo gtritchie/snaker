@@ -90,7 +90,7 @@ const FONT = {
   '/': G(0,0, 0b00000010, 0b00000100, 0b00001000, 0b00010000, 0b00100000, 0b01000000, 0,            0,            0,0),
   '-': G(0,0, 0,            0,            0,            0b01111110, 0,            0,            0,            0,            0,0),
   '!': G(0,0, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0b00011000, 0,            0b00011000, 0b00011000, 0,0),
-  '%': G(0,0, 0b01100010, 0b10010100, 0b01101000, 0b00010000, 0b00101100, 0b01010010, 0b01000110, 0,            0,0),
+  '%': G(0,0, 0b11000010, 0b11000100, 0b00001000, 0b00010000, 0b00100000, 0b01000110, 0b10000110, 0,            0,0),
 }
 
 const EMPTY_GLYPH = G(0,0,0,0,0,0,0,0,0,0,0,0)
@@ -113,15 +113,18 @@ export function getDefinedChars() {
 // `x` and `y` are top-left coordinates in canvas pixels (already multiplied by scale).
 //
 // Character code semantics:
-//   32-95:    ASCII uppercase/digit/symbol (rendered green-on-black)
-//   96:       "blank space" sentinel — the playable empty cell, rendered black
-//   128-255:  semigraphics color block (see decodeSemigraphic)
+//   32-63:    "alphanumeric inverse" range on the CoCo VDG (codes for space,
+//             punctuation, digits, and a few symbols). Hardware renders these in
+//             inverse video — green background with the character pattern in black.
+//   64-95:    "alphanumeric normal" range — uppercase letters, '@', '[', etc.
+//             Rendered black-on-green-character (i.e. green pattern on black bg).
+//   96:       "blank space" sentinel — the playable empty cell, rendered black.
+//   128-255:  semigraphics color block (see decodeSemigraphic).
 //
-// `inverse` swaps fg/bg for text cells. Lowercase ASCII codes (97-127) are not
-// expected as direct input here — screen.printAt translates lowercase to uppercase
-// + inverse=true before calling drawCell, preserving CoCo's lowercase = inverse-
-// uppercase convention. If a lowercase code does reach drawCell it will be folded
-// to its uppercase glyph by getCharGlyph and rendered in plain (non-inverse) text.
+// `inverse` is an explicit override flag set by screen.printAt for lowercase letters
+// (CoCo convention: PRINT 'a' shows as inverse 'A') and toggled globally by the
+// crash-flash effect. The intrinsic 32-63 inverse and the explicit flag XOR together
+// to produce the final inversion, matching how the original CoCo VDG composes them.
 export function drawCell(ctx, code, x, y, scale, inverse = false) {
   const w = FONT_WIDTH * scale
   const h = FONT_HEIGHT * scale
@@ -131,12 +134,17 @@ export function drawCell(ctx, code, x, y, scale, inverse = false) {
     return
   }
 
-  const bg = inverse ? '#07ff00' : '#000000'
-  const fg = inverse ? '#000000' : '#07ff00'
+  const intrinsicInverse = code >= 32 && code <= 63
+  const effectiveInverse = inverse !== intrinsicInverse   // XOR
+  const bg = effectiveInverse ? '#07ff00' : '#000000'
+  const fg = effectiveInverse ? '#000000' : '#07ff00'
   ctx.fillStyle = bg
   ctx.fillRect(x, y, w, h)
 
-  if (code === 32 || code === 96) return
+  // Code 96 is the blank "playable" cell — never draw a glyph for it.
+  // Code 32 (space) draws zero pattern bits but still renders the (now green) bg,
+  // matching the CoCo's PRINT-of-space behavior.
+  if (code === 96) return
 
   const glyph = getCharGlyph(String.fromCharCode(code))
   ctx.fillStyle = fg

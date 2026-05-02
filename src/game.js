@@ -50,9 +50,146 @@ export async function runGame(canvas, registerAudio = () => {}) {
   window.addEventListener('resize', () => pickInitialScale(screen))
 
   await titleScreen(screen, audio, input)
-  await setup(screen, audio)
 
-  // playRounds, win, score, etc. — wired up in Task 13-15.
+  while (true) {
+    await setup(screen, audio)
+    const elapsed = await playRounds(screen, audio, input)
+    // win, score, persistence, again — wired up in Task 14-15.
+    void elapsed
+    return
+  }
+}
+
+// Color block codes from BASIC line 30 DATA: 159, 191, 207, 239, 255.
+const COLOR_BLOCKS = [159, 191, 207, 239, 255]
+
+// Snake body codes used by the inner loop FOR N=148 TO 244 STEP 16.
+const SNAKE_CODES = [148, 164, 180, 196, 212, 228, 244]
+
+// Returns total elapsed ticks (60 Hz) once the player completes 3 successful descents.
+// Only the active-play time of each descent is counted — inter-run celebration delays
+// are excluded, mirroring the original's TIMER=HT save/restore on lines 380-400.
+async function playRounds(screen, audio, input) {
+  let leftEdge = 1025, rightEdge = 1054, playerPos = 1039
+  let runs = 0
+  let accumulatedMs = 0
+
+  while (true) {
+    const runStart = performance.now()
+    await singleDescent(screen, audio, input,
+      { leftEdge, rightEdge, playerPos })
+    accumulatedMs += performance.now() - runStart
+    leftEdge = 1025; rightEdge = 1054; playerPos = 1039
+
+    runs += 1
+    if (runs >= 3) return msToTicks(accumulatedMs)
+    await celebrateRun(screen, audio)   // not counted toward score
+  }
+}
+
+function msToTicks(ms) {
+  return Math.floor(ms / (1000 / 60))
+}
+
+// Runs one row-by-row descent. Crashes back the snake up one row in place
+// (matches the original's GOTO 130 from the crash handler) and returns only
+// when the snake reaches the bottom row.
+async function singleDescent(screen, audio, input, init) {
+  let { leftEdge, rightEdge, playerPos } = init
+
+  while (true) {
+    let crashed = false
+
+    // Inner two-pass loop placing 14 segments per row (QQ=1..2, N=148..244 STEP 16).
+    for (let pass = 0; pass < 2 && !crashed; pass++) {
+      for (let i = 0; i < SNAKE_CODES.length; i++) {
+        const snakeChar = SNAKE_CODES[i]
+        const moveDir = input.getX()
+        const speedMs = input.getSpeedMs()
+
+        playerPos = playerPos + moveDir
+        if (playerPos < leftEdge) playerPos = leftEdge
+        else if (playerPos > rightEdge) playerPos = rightEdge
+
+        if (screen.peek(playerPos) !== 96) {
+          ;({ leftEdge, rightEdge, playerPos } = await crashHandler(screen, audio,
+            { leftEdge, rightEdge, playerPos }))
+          crashed = true
+          break
+        }
+
+        screen.poke(playerPos, snakeChar)
+        audio.play("O2 T255 G O3 C")
+
+        await sleep(speedMs)
+
+        // Scatter random color blocks on bottom row (lines 210-230).
+        screen.poke(1504 + Math.floor(Math.random() * 30), COLOR_BLOCKS[Math.floor(Math.random() * 5)])
+        screen.poke(1504 + Math.floor(Math.random() * 30), COLOR_BLOCKS[Math.floor(Math.random() * 5)])
+        screen.poke(1504, 175)
+        screen.poke(1535, 175)
+      }
+    }
+
+    if (!crashed) {
+      // Advance row (BASIC lines 270-290).
+      leftEdge += 32
+      rightEdge += 32
+      if (leftEdge === 1441) {
+        // Reached bottom row.
+        screen.poke(playerPos, 148)
+        playerPos += 32
+        screen.poke(playerPos, 244)
+        return
+      }
+      screen.poke(playerPos, 148)
+      playerPos += 32
+    }
+    // If crashed, crashHandler already shifted the state back; outer loop continues.
+  }
+}
+
+async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
+  // BASIC lines 320-350.
+  leftEdge -= 32
+  rightEdge -= 32
+  if (leftEdge < 1025) {
+    leftEdge = 1025
+    rightEdge += 32
+  }
+
+  for (let pl = 0; pl < 2; pl++) {
+    audio.play("O2 T2 L8 B")
+    screen.setInverted(true)
+    await sleep(60)
+    audio.play("L8 E")
+    screen.setInverted(false)
+    await sleep(60)
+  }
+
+  screen.poke(1505 + Math.floor(Math.random() * 29), COLOR_BLOCKS[Math.floor(Math.random() * 5)])
+  screen.poke(1504, 175)
+  screen.poke(1535, 175)
+  screen.poke(playerPos, 96)
+  playerPos -= 32
+  screen.poke(playerPos, 96)
+  screen.poke(playerPos + 1, 96)
+  screen.poke(playerPos - 1, 96)
+  if (playerPos < 1025) playerPos += 32
+
+  return { leftEdge, rightEdge, playerPos }
+}
+
+async function celebrateRun(screen, audio) {
+  // BASIC lines 390-400: 15 quick beeps, then re-seal bottom-row edges.
+  for (let i = 0; i < 15; i++) {
+    audio.play("O4 T255 A B E")
+    screen.poke(1504, 175)
+    screen.poke(1535, 175)
+    await sleep(20)
+  }
+  screen.poke(1504, 175)
+  screen.poke(1535, 175)
 }
 
 async function titleScreen(screen, audio, input) {

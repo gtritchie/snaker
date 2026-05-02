@@ -1,6 +1,7 @@
 import { createScreen } from './screen.js'
 import { createAudio } from './audio.js'
 import { createInput } from './input.js'
+import { loadBestScore, saveBestScore } from './storage.js'
 
 // Convert elapsed timer ticks (60 Hz) to "MM:SS".
 // Mirrors the original BASIC formatting from snaker.bas lines 520-540, including
@@ -51,13 +52,28 @@ export async function runGame(canvas, registerAudio = () => {}) {
 
   await titleScreen(screen, audio, input)
 
+  let bestTicks = (loadBestScore()?.ticks) ?? Infinity
+
   while (true) {
     await setup(screen, audio)
     const elapsed = await playRounds(screen, audio, input)
     await winSequence(screen, audio)
-    // score, persistence, again — wired up in Task 15.
-    void elapsed
-    return
+    const displayTime = await showScore(screen, audio, elapsed)
+    if (elapsed < bestTicks) {
+      bestTicks = elapsed
+      await captureNewBestScore(screen, audio, input, elapsed, displayTime)
+    }
+    await showBestScore(screen, audio)
+    if (!(await playAgainPrompt(screen, audio, input))) {
+      // BASIC line 720: print final best score and end.
+      const best = loadBestScore()
+      screen.cls(0)
+      if (best) {
+        screen.printAt(0, `BEST SCORE: ${best.name}`)
+        screen.printAt(64, best.displayTime)
+      }
+      return
+    }
   }
 }
 
@@ -75,6 +91,86 @@ async function winSequence(screen, audio) {
     await audio.play(ARPEGGIO)
   }
   await audio.play("V15")
+}
+
+async function showScore(screen, audio, elapsed) {
+  // BASIC line 510: CLS RND(4)+1; PRINT@168,"YOU MADE IT IN:"
+  screen.cls(rnd(4) + 1)
+  screen.printAt(168, 'YOU MADE IT IN:')
+
+  const timeStr = formatScore(elapsed)
+  // Decorative bar of "!" at offsets 288-319 (BASIC POKE 1312-1343, lines 550).
+  for (let p = 1024 + 288; p <= 1024 + 319; p++) screen.poke(p, 33)
+  screen.printAt(301, timeStr)
+
+  // BASIC lines 570-580: ascending chromatic 5 octaves x 12 notes.
+  for (let o = 1; o <= 5; o++) {
+    for (let n = 1; n <= 12; n++) {
+      await audio.play(`T255 O${o} N${n}`)
+    }
+  }
+  await sleep(1500)  // BASIC FOR PP=1 TO 1800 — calibrate to taste in Task 16
+  return timeStr
+}
+
+async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
+  // BASIC lines 790-800.
+  screen.cls(rnd(8))
+  screen.printAt(0, 'WHAT IS YOUR NAME')
+
+  let name = ''
+  await input.lineInput({
+    maxLength: 12,
+    render(buffer) {
+      const promptOffset = 32
+      const prompt = '>>>>?' + buffer
+      // Blank the row first.
+      for (let i = 0; i < 32; i++) screen.poke(1024 + promptOffset + i, 32)
+      screen.printAt(promptOffset, prompt)
+      const cursorPos = promptOffset + prompt.length
+      if (cursorPos < promptOffset + 32) screen.poke(1024 + cursorPos, 143)
+      name = buffer
+    },
+  })
+  saveBestScore({ name: name.toUpperCase(), ticks: elapsed, displayTime })
+  void audio
+}
+
+async function showBestScore(screen, audio) {
+  const best = loadBestScore()
+  if (!best) return
+  // BASIC lines 620-660.
+  screen.cls(0)
+  screen.printAt(10, 'BEST SCORE')
+
+  for (let i = 0; i < 32; i++) screen.poke(1024 + 224 + i, 143)
+  for (let i = 0; i < 32; i++) screen.poke(1024 + 192 + i, 255)
+  for (let i = 0; i < 32; i++) screen.poke(1024 + 256 + i, 255)
+
+  screen.printAt(224, `${best.name}----------${best.displayTime}`.slice(0, 32))
+
+  for (let o = 5; o >= 1; o--) {
+    for (let n = 12; n >= 1; n--) {
+      await audio.play(`T255 O${o} N${n}`)
+    }
+  }
+  await sleep(2000)
+}
+
+async function playAgainPrompt(screen, audio, input) {
+  // BASIC lines 700-730.
+  audio.flush()
+  audio.play("V15 O3 N5")
+  screen.cls(0)
+  screen.printAt(0, 'ANOTHER GAME (Y/N)')
+
+  while (true) {
+    const k = (await input.waitForKey()).toUpperCase()
+    if (k === 'Y') return true
+    if (k === 'N') return false
+    audio.flush()
+    audio.play("O3 N1")
+  }
 }
 
 // Color block codes from BASIC line 30 DATA: 159, 191, 207, 239, 255.

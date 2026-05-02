@@ -145,7 +145,7 @@ function noteNumberFrequency(num, octave) {
 //   - Step beep (T=255 L=4):  8/(255*4) = 7.8 ms/note   ≈ a brief click
 //   - Crash (T=2 L=8):        8/(2*8)   = 0.5 s/note    ≈ a slow ominous tone
 // Tweak by ear if the music feels wrong. The first revision (240) was 30x too slow.
-const WHOLE_NOTE_SEC_AT_T_1 = 8
+const WHOLE_NOTE_SEC_AT_T_1 = 5
 
 function eventDurationSec(eventLength, dotMul, tempo) {
   const wholeSec = WHOLE_NOTE_SEC_AT_T_1 / tempo

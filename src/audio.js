@@ -138,8 +138,14 @@ function noteNumberFrequency(num, octave) {
 }
 
 // Calibration constant: how long is one whole note (length=1) at tempo T=1?
-// Tuned by ear in Task 16.
-const WHOLE_NOTE_SEC_AT_T_1 = 240
+// CoCo PLAY's tempo formula isn't strictly linear, but for our purposes the
+// approximation `note_seconds = WHOLE / (tempo * length)` works. At WHOLE=8 and
+// the original game's settings:
+//   - Bublitchki (T=4 L=8):   8/(4*8)   = 0.25 s/note   ≈ 240 BPM at L8
+//   - Step beep (T=255 L=4):  8/(255*4) = 7.8 ms/note   ≈ a brief click
+//   - Crash (T=2 L=8):        8/(2*8)   = 0.5 s/note    ≈ a slow ominous tone
+// Tweak by ear if the music feels wrong. The first revision (240) was 30x too slow.
+const WHOLE_NOTE_SEC_AT_T_1 = 8
 
 function eventDurationSec(eventLength, dotMul, tempo) {
   const wholeSec = WHOLE_NOTE_SEC_AT_T_1 / tempo

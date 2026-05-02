@@ -145,7 +145,7 @@ export function createAudio() {
 
   function ensureContext() {
     if (ac) return ac
-    ac = new (window.AudioContext || window.webkitAudioContext)()
+    ac = new AudioContext()
     masterGain = ac.createGain()
     masterGain.gain.value = 1.0
     masterGain.connect(ac.destination)

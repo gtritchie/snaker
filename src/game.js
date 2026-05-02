@@ -82,15 +82,15 @@ async function titleScreen(screen, audio, input) {
 
 async function setup(screen, audio) {
   // Lines 90-100 of snaker.bas: CLS, then draw left and right walls one row at a time
-  // with stepped tones.
+  // with stepped tones. We await each play() so the visual pacing matches the audio
+  // (the original BASIC's PLAY blocks). Without awaiting, fire-and-forget plays
+  // queue many seconds of audio behind a sub-second visual loop.
   await audio.resume()
   screen.cls(0)
   for (let p = 1024; p <= 1504; p += 32) {
     screen.poke(p, 175)
-    audio.play("T255 O4 A B")
-    await sleep(40)
+    await audio.play("T255 O4 A B")
     screen.poke(p + 31, 175)
-    audio.play("O4 E")
-    await sleep(40)
+    await audio.play("O4 E")
   }
 }

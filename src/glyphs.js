@@ -115,7 +115,11 @@ export function getDefinedChars() {
 // Character code semantics:
 //   32-63:    space, punctuation, digits — the CoCo VDG's "alphanumeric inverse" range
 //   64-95:    uppercase letters and a few symbols — the VDG's "alphanumeric normal" range
-//   96:       "blank space" sentinel — playable empty cell, rendered solid black
+//   96:       "blank playable cell" sentinel — falls in the VDG's semigraphics-6 range
+//             on real hardware and renders as a SOLID GREEN BLOCK. CoCo BASIC's CLS
+//             fills the screen with this code, which is also why the gameplay's
+//             collision check is "IF PEEK(P)<>96 THEN crash" — 96 doubles as both
+//             the CLS fill value and the "snake may enter" sentinel.
 //   128-255:  semigraphics color block (see decodeSemigraphic)
 //
 // `inverse` is the FINAL rendering mode for the cell (true = green bg + black pattern,
@@ -131,12 +135,17 @@ export function drawCell(ctx, code, x, y, scale, inverse = false) {
     return
   }
 
+  // Code 96: solid green block by default; flips to black under crash-flash invert.
+  if (code === 96) {
+    ctx.fillStyle = inverse ? '#000000' : '#07ff00'
+    ctx.fillRect(x, y, w, h)
+    return
+  }
+
   const bg = inverse ? '#07ff00' : '#000000'
   const fg = inverse ? '#000000' : '#07ff00'
   ctx.fillStyle = bg
   ctx.fillRect(x, y, w, h)
-
-  if (code === 96) return   // blank playable cell — bg only, no glyph
 
   const glyph = getCharGlyph(String.fromCharCode(code))
   ctx.fillStyle = fg

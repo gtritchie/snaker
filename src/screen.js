@@ -83,10 +83,9 @@ export function createScreen(canvas) {
   // Equivalent to CoCo CLS [color]. Fills vram with the appropriate sentinel:
   //   colorIndex 0 (default): code 96, the "blank playable cell" sentinel that
   //                           collision logic checks against (PEEK(P) === 96).
-  //                           Code 96 is in the VDG's "alphanumeric normal" range
-  //                           with no glyph bits set, so it renders solid black —
-  //                           distinct from code 32, which is in the 32-63 inverse
-  //                           range and would render as a solid green block.
+  //                           On the VDG, code 96 falls into the semigraphics-6
+  //                           range and renders as a solid green block — which is
+  //                           why CoCo BASIC's CLS produces a green screen.
   //   colorIndex 1-8:         all-quadrants semigraphic of the requested color (CoCo CLS arg).
   function cls(colorIndex = 0) {
     const code = colorIndex === 0 ? 96 : 128 + (((colorIndex - 1) & 0x7) << 4) + 15

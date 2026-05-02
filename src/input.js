@@ -14,23 +14,27 @@ function computeSpeed(up, down) {
 }
 
 export function createInput(canvas) {
-  const keys = { left: false, right: false, up: false, down: false }
+  // Keyboard and touch direction state are tracked independently so that ending
+  // a touch does not clobber a held keyboard direction (and vice versa).
+  const kbKeys = { left: false, right: false, up: false, down: false }
+  const tcKeys = { left: false, right: false, up: false, down: false }
+
   const keyListeners = []
   let lineInputState = null
 
-  function setKeyFromEvent(e, down) {
+  function setKbKeyFromEvent(e, down) {
     const k = e.key
     let handled = true
-    if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.left = down
-    else if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.right = down
-    else if (k === 'ArrowUp' || k === 'w' || k === 'W') keys.up = down
-    else if (k === 'ArrowDown' || k === 's' || k === 'S') keys.down = down
+    if (k === 'ArrowLeft' || k === 'a' || k === 'A') kbKeys.left = down
+    else if (k === 'ArrowRight' || k === 'd' || k === 'D') kbKeys.right = down
+    else if (k === 'ArrowUp' || k === 'w' || k === 'W') kbKeys.up = down
+    else if (k === 'ArrowDown' || k === 's' || k === 'S') kbKeys.down = down
     else handled = false
     if (handled) e.preventDefault()
   }
 
   function onKeyDown(e) {
-    setKeyFromEvent(e, true)
+    setKbKeyFromEvent(e, true)
     if (lineInputState) {
       handleLineInputKey(e)
       return
@@ -42,7 +46,7 @@ export function createInput(canvas) {
   }
 
   function onKeyUp(e) {
-    setKeyFromEvent(e, false)
+    setKbKeyFromEvent(e, false)
   }
 
   function handleLineInputKey(e) {
@@ -55,7 +59,13 @@ export function createInput(canvas) {
     }
     if (e.key === 'Backspace') {
       lineInputState.buffer = lineInputState.buffer.slice(0, -1)
-    } else if (e.key.length === 1 && e.key.charCodeAt(0) >= 32 && e.key.charCodeAt(0) < 127) {
+    } else if (
+      !e.ctrlKey && !e.metaKey && !e.altKey
+      && e.key.length === 1
+      && e.key.charCodeAt(0) >= 32 && e.key.charCodeAt(0) < 127
+    ) {
+      // Skip when a modifier is held so shortcuts like Ctrl+C / Cmd+R don't
+      // pollute the buffer with the underlying character key.
       if (lineInputState.buffer.length < lineInputState.maxLength) {
         lineInputState.buffer += e.key
       }
@@ -66,7 +76,7 @@ export function createInput(canvas) {
   // ---- touch joystick ----
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
   let touchActive = false
-  let touchCenter = null    // {x, y} in canvas-local pixels
+  let touchCenter = null
   let touchPos = null
 
   function onTouchStart(e) {
@@ -81,7 +91,7 @@ export function createInput(canvas) {
       const resolvers = keyListeners.splice(0)
       for (const r of resolvers) r(' ')
     }
-    updateKeysFromTouch()
+    updateTouchKeys()
   }
 
   function onTouchMove(e) {
@@ -89,7 +99,7 @@ export function createInput(canvas) {
     const t = e.touches[0]
     const rect = canvas.getBoundingClientRect()
     touchPos = { x: t.clientX - rect.left, y: t.clientY - rect.top }
-    updateKeysFromTouch()
+    updateTouchKeys()
     e.preventDefault()
   }
 
@@ -97,19 +107,19 @@ export function createInput(canvas) {
     touchActive = false
     touchCenter = null
     touchPos = null
-    keys.left = keys.right = keys.up = keys.down = false
+    tcKeys.left = tcKeys.right = tcKeys.up = tcKeys.down = false
     e.preventDefault()
   }
 
-  function updateKeysFromTouch() {
+  function updateTouchKeys() {
     if (!touchActive || !touchCenter || !touchPos) return
     const dx = touchPos.x - touchCenter.x
     const dy = touchPos.y - touchCenter.y
     const deadZone = 16
-    keys.left  = dx < -deadZone
-    keys.right = dx >  deadZone
-    keys.up    = dy < -deadZone
-    keys.down  = dy >  deadZone
+    tcKeys.left  = dx < -deadZone
+    tcKeys.right = dx >  deadZone
+    tcKeys.up    = dy < -deadZone
+    tcKeys.down  = dy >  deadZone
   }
 
   if (isTouchDevice) {
@@ -123,11 +133,11 @@ export function createInput(canvas) {
   window.addEventListener('keyup', onKeyUp)
 
   function getX() {
-    return computeX(keys.left, keys.right)
+    return computeX(kbKeys.left || tcKeys.left, kbKeys.right || tcKeys.right)
   }
 
   function getSpeedMs() {
-    return computeSpeed(keys.up, keys.down)
+    return computeSpeed(kbKeys.up || tcKeys.up, kbKeys.down || tcKeys.down)
   }
 
   function waitForKey() {
@@ -136,9 +146,16 @@ export function createInput(canvas) {
 
   // Promise<string>. The caller provides `render(currentBuffer)` invoked on every
   // buffer change so the caller can redraw the prompt + buffer + cursor on canvas.
+  // If a previous lineInput is still pending, it is rejected before the new one
+  // replaces it — concurrent line input is not supported.
   function lineInput({ render, maxLength = 12 }) {
-    return new Promise(resolve => {
-      lineInputState = { resolve, render, buffer: '', maxLength }
+    if (lineInputState) {
+      const stale = lineInputState
+      lineInputState = null
+      stale.reject(new Error('lineInput superseded by a new call'))
+    }
+    return new Promise((resolve, reject) => {
+      lineInputState = { resolve, reject, render, buffer: '', maxLength }
       render('')
     })
   }

@@ -113,18 +113,15 @@ export function getDefinedChars() {
 // `x` and `y` are top-left coordinates in canvas pixels (already multiplied by scale).
 //
 // Character code semantics:
-//   32-63:    "alphanumeric inverse" range on the CoCo VDG (codes for space,
-//             punctuation, digits, and a few symbols). Hardware renders these in
-//             inverse video — green background with the character pattern in black.
-//   64-95:    "alphanumeric normal" range — uppercase letters, '@', '[', etc.
-//             Rendered black-on-green-character (i.e. green pattern on black bg).
-//   96:       "blank space" sentinel — the playable empty cell, rendered black.
-//   128-255:  semigraphics color block (see decodeSemigraphic).
+//   32-63:    space, punctuation, digits — the CoCo VDG's "alphanumeric inverse" range
+//   64-95:    uppercase letters and a few symbols — the VDG's "alphanumeric normal" range
+//   96:       "blank space" sentinel — playable empty cell, rendered solid black
+//   128-255:  semigraphics color block (see decodeSemigraphic)
 //
-// `inverse` is an explicit override flag set by screen.printAt for lowercase letters
-// (CoCo convention: PRINT 'a' shows as inverse 'A') and toggled globally by the
-// crash-flash effect. The intrinsic 32-63 inverse and the explicit flag XOR together
-// to produce the final inversion, matching how the original CoCo VDG composes them.
+// `inverse` is the FINAL rendering mode for the cell (true = green bg + black pattern,
+// false = black bg + green pattern). The caller composes intrinsic VDG inverse, any
+// per-cell force-inverse flag, and the global crash-flash flip into this single boolean
+// before calling drawCell.
 export function drawCell(ctx, code, x, y, scale, inverse = false) {
   const w = FONT_WIDTH * scale
   const h = FONT_HEIGHT * scale
@@ -134,17 +131,12 @@ export function drawCell(ctx, code, x, y, scale, inverse = false) {
     return
   }
 
-  const intrinsicInverse = code >= 32 && code <= 63
-  const effectiveInverse = inverse !== intrinsicInverse   // XOR
-  const bg = effectiveInverse ? '#07ff00' : '#000000'
-  const fg = effectiveInverse ? '#000000' : '#07ff00'
+  const bg = inverse ? '#07ff00' : '#000000'
+  const fg = inverse ? '#000000' : '#07ff00'
   ctx.fillStyle = bg
   ctx.fillRect(x, y, w, h)
 
-  // Code 96 is the blank "playable" cell — never draw a glyph for it.
-  // Code 32 (space) draws zero pattern bits but still renders the (now green) bg,
-  // matching the CoCo's PRINT-of-space behavior.
-  if (code === 96) return
+  if (code === 96) return   // blank playable cell — bg only, no glyph
 
   const glyph = getCharGlyph(String.fromCharCode(code))
   ctx.fillStyle = fg
@@ -157,6 +149,13 @@ export function drawCell(ctx, code, x, y, scale, inverse = false) {
       }
     }
   }
+}
+
+// Helper for callers: given a character code and an optional force-inverse flag,
+// returns the cell's "natural" inverse state (intrinsic VDG inverse OR forced).
+export function naturalInverse(code, forceInverse = false) {
+  if (forceInverse) return true
+  return code >= 32 && code <= 63
 }
 
 function drawSemigraphic(ctx, code, x, y, scale) {

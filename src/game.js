@@ -320,10 +320,10 @@ async function celebrateRun(screen, audio) {
 async function titleScreen(screen, audio, input) {
   // Pre-title gateway. Browsers block audio autoplay until the user has interacted
   // with the page, so we show a plain "RUN" prompt first and use that key press
-  // to resume the AudioContext. The original CoCo experience started with a
-  // similar moment: typing RUN at the BASIC prompt to launch the program.
-  screen.cls(0)
-  screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM')
+  // to resume the AudioContext. Styled to match the CoCo BASIC command-line look:
+  // black text on a uniform green background.
+  for (let i = 0; i < 512; i++) screen.poke(1024 + i, 32) // code 32 = solid green block
+  screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM', { inverse: true })
   await input.waitForKey()
   await audio.resume()
 

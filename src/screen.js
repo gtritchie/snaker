@@ -1,4 +1,4 @@
-import { drawCell, FONT_WIDTH, FONT_HEIGHT } from './glyphs.js'
+import { drawCell, naturalInverse, FONT_WIDTH, FONT_HEIGHT } from './glyphs.js'
 
 const COLS = 32
 const ROWS = 16
@@ -37,8 +37,10 @@ export function createScreen(canvas) {
     const x = col * FONT_WIDTH * scale
     const y = row * FONT_HEIGHT * scale
     const code = vram[offset]
-    const inv = !!inverseFlags[offset] !== inverted
-    drawCell(ctx, code === 0 ? 32 : code, x, y, scale, inv)
+    // Compose: per-cell force flag OR intrinsic VDG inverse, then XOR global crash flash.
+    const natural = naturalInverse(code, !!inverseFlags[offset])
+    const effective = natural !== inverted
+    drawCell(ctx, code === 0 ? 32 : code, x, y, scale, effective)
   }
 
   function offsetOf(addr) {
@@ -61,16 +63,19 @@ export function createScreen(canvas) {
   }
 
   // Print a string at video-RAM offset (0..511) — equivalent to BASIC PRINT@offset.
-  // Lowercase letters render in inverse video (CoCo convention: BASIC stores them as
-  // their uppercase code with the inverse-video bit set).
-  function printAt(offset, str) {
+  // Lowercase letters always render in inverse video (CoCo convention).
+  // Pass { inverse: true } to force every cell into inverse mode, which simulates the
+  // CoCo BASIC "command line" black-on-green look (uppercase letters, spaces, and
+  // symbols all render as black-on-green).
+  function printAt(offset, str, options = {}) {
+    const forceInverse = options.inverse === true
     for (let i = 0; i < str.length; i++) {
       const idx = offset + i
       if (idx < 0 || idx >= VRAM_SIZE) continue
       const ch = str.charCodeAt(i)
       const isLower = ch >= 97 && ch <= 122
       vram[idx] = isLower ? ch - 32 : ch
-      inverseFlags[idx] = isLower ? 1 : 0
+      inverseFlags[idx] = (isLower || forceInverse) ? 1 : 0
       renderCell(idx)
     }
   }

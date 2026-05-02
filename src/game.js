@@ -119,13 +119,18 @@ async function singleDescent(screen, audio, input, init) {
         }
 
         screen.poke(playerPos, snakeChar)
+        // Step beep is fire-and-forget but flush first so a slow tempo can't
+        // pile audio up behind the real-time gameplay loop.
+        audio.flush()
         audio.play("O2 T255 G O3 C")
 
         await sleep(speedMs)
 
         // Scatter random color blocks on bottom row (lines 210-230).
-        screen.poke(1504 + Math.floor(Math.random() * 30), COLOR_BLOCKS[Math.floor(Math.random() * 5)])
-        screen.poke(1504 + Math.floor(Math.random() * 30), COLOR_BLOCKS[Math.floor(Math.random() * 5)])
+        // BASIC RND(30) yields 1..30, so target offsets 1505..1534.
+        // BASIC RND(5) yields 1..5; here we map to a 0..4 array index.
+        screen.poke(1504 + rnd(30), COLOR_BLOCKS[rnd(5) - 1])
+        screen.poke(1504 + rnd(30), COLOR_BLOCKS[rnd(5) - 1])
         screen.poke(1504, 175)
         screen.poke(1535, 175)
       }
@@ -159,15 +164,18 @@ async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
   }
 
   for (let pl = 0; pl < 2; pl++) {
+    audio.flush()
     audio.play("O2 T2 L8 B")
     screen.setInverted(true)
     await sleep(60)
+    audio.flush()
     audio.play("L8 E")
     screen.setInverted(false)
     await sleep(60)
   }
 
-  screen.poke(1505 + Math.floor(Math.random() * 29), COLOR_BLOCKS[Math.floor(Math.random() * 5)])
+  // BASIC RND(29)+1505 → 1506..1534.
+  screen.poke(1505 + rnd(29), COLOR_BLOCKS[rnd(5) - 1])
   screen.poke(1504, 175)
   screen.poke(1535, 175)
   screen.poke(playerPos, 96)
@@ -183,6 +191,7 @@ async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
 async function celebrateRun(screen, audio) {
   // BASIC lines 390-400: 15 quick beeps, then re-seal bottom-row edges.
   for (let i = 0; i < 15; i++) {
+    audio.flush()
     audio.play("O4 T255 A B E")
     screen.poke(1504, 175)
     screen.poke(1535, 175)

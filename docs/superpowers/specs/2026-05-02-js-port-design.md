@@ -73,13 +73,17 @@ Phases run sequentially as `async` functions, mirroring the top-to-bottom struct
 
 ```js
 async function run(canvas) {
+  let bestTicks = storage.loadBestTicks() ?? Infinity   // Infinity so first score always registers
   await titleScreen()
   while (true) {
     await setup()
     const elapsed = await playRounds()    // 3 successful descents; returns ticks elapsed
     await winSequence()
     await showScore(elapsed)
-    if (elapsed < bestTicks) await captureNewBestScore(elapsed)
+    if (elapsed < bestTicks) {
+      bestTicks = elapsed
+      await captureNewBestScore(elapsed)
+    }
     await showBestScore()
     if (!await playAgainPrompt()) return
   }
@@ -194,19 +198,27 @@ Original ran on 0.89 MHz CoCo (or 1.78 MHz with `POKE 65495,0`). Replacements:
 
 ## Astro embedding
 
-Designed for iframe embed via `public/snaker/`. Entry point is structured to work both standalone and as a callable function:
+Designed for iframe embed via `public/snaker/`. `main.js` is a side-effect-free module that only *exports* `boot(canvas, options?)`. Standalone-page boot lives in a separate inline script in `index.html` so importing `main.js` from anywhere else is safe.
 
 ```js
-// main.js
-export function boot(canvas) { /* ... */ }
-
-// At the bottom, only when loaded as the standalone page:
-if (document.currentScript?.dataset.autoboot !== 'false') {
-  boot(document.getElementById('game'))
-}
+// main.js — no top-level side effects
+export function boot(canvas, options = {}) { /* ... */ }
 ```
 
-`index.html` sets up the canvas and CSS frame. The Astro page either iframes that page or, later, imports `boot` directly and calls it with its own canvas.
+```html
+<!-- index.html -->
+<canvas id="game"></canvas>
+<script type="module">
+  import { boot } from './src/main.js'
+  boot(document.getElementById('game'))
+</script>
+```
+
+For Astro path A (iframe), the Astro page just embeds `<iframe src="/snaker/">` and `index.html` boots itself.
+
+For Astro path B (direct embed, future), the Astro page imports `boot` from the module and calls it with its own canvas — no autoboot guard needed because `main.js` has no top-level execution.
+
+(Note: `document.currentScript` is `null` for ES modules, so an autoboot guard based on it would be unreliable. Keeping the autoboot out of `main.js` entirely avoids the problem.)
 
 ## Testing
 

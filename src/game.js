@@ -85,6 +85,9 @@ const WIN_PHRASES = [
 const ARPEGGIO = "T255 O1 E F G B C A E D A G F C E D C B G E A D D A B C G E A D G C A E F E B C E D G A E D B C D E D G B C E D C"
 
 async function winSequence(screen, audio) {
+  // Drain any tail of the final fire-and-forget step beep so the awaited
+  // win phrases line up wallclock-time with audio-time.
+  audio.flush()
   for (const phrase of WIN_PHRASES) {
     screen.cls(rnd(8))
     await audio.play(phrase)

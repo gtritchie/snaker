@@ -105,3 +105,133 @@ export function parsePlayString(input) {
 
   return events
 }
+
+// Frequency table: equal-tempered, A4 = 440 Hz. Note names mapped to semitone offsets
+// from C of the same octave.
+const NOTE_SEMITONE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }
+
+function noteFrequency(name, accidental, octave) {
+  // CoCo PLAY octave 4 corresponds approximately to MIDI octave 4 (C4 = 261.63 Hz).
+  const midi = (octave + 1) * 12 + NOTE_SEMITONE[name] + accidental
+  return 440 * Math.pow(2, (midi - 69) / 12)
+}
+
+function noteNumberFrequency(num, octave) {
+  // CoCo N1..N12 maps to a chromatic scale starting at C of `octave`.
+  const midi = (octave + 1) * 12 + (num - 1)
+  return 440 * Math.pow(2, (midi - 69) / 12)
+}
+
+// Tempo conversion: how long is one whole note (length=1) at tempo T?
+// Calibration constant; tuned by ear in Task 16.
+const WHOLE_NOTE_SEC_AT_T_1 = 240
+
+function eventDurationSec(eventLength, dotMultiplier, tempo) {
+  const wholeSec = WHOLE_NOTE_SEC_AT_T_1 / tempo
+  return (wholeSec / eventLength) * dotMultiplier
+}
+
+// Convert CoCo volume (1-31) to a linear gain. 0.25 ceiling keeps mixing comfortable.
+function volumeToGain(v) {
+  return Math.max(0, Math.min(31, v)) / 31 * 0.25
+}
+
+export function createAudio() {
+  let ac = null
+  let masterGain = null
+  let queueTime = 0
+  let runningVolume = 15  // carries across play() calls so V>/V< can resolve relatively
+  const activeNodes = new Set()
+
+  function ensureContext() {
+    if (ac) return ac
+    ac = new (window.AudioContext || window.webkitAudioContext)()
+    masterGain = ac.createGain()
+    masterGain.gain.value = 1.0
+    masterGain.connect(ac.destination)
+    queueTime = ac.currentTime
+    return ac
+  }
+
+  function resume() {
+    ensureContext()
+    if (ac.state === 'suspended') return ac.resume()
+    return Promise.resolve()
+  }
+
+  function suspend() {
+    if (ac && ac.state === 'running') return ac.suspend()
+    return Promise.resolve()
+  }
+
+  // Cancel everything currently scheduled and reset queueTime to "now". Used when
+  // transitioning past the title screen so setup beeps don't queue behind the melody.
+  function flush() {
+    if (!ac) return
+    for (const osc of activeNodes) {
+      try { osc.stop(0) } catch {}
+    }
+    activeNodes.clear()
+    queueTime = ac.currentTime
+  }
+
+  function scheduleTone(freq, durationSec, gain) {
+    const osc = ac.createOscillator()
+    osc.type = 'square'
+    osc.frequency.value = freq
+    const env = ac.createGain()
+    const attack = 0.005, release = 0.005
+    env.gain.setValueAtTime(0, queueTime)
+    env.gain.linearRampToValueAtTime(gain, queueTime + attack)
+    env.gain.setValueAtTime(gain, queueTime + Math.max(0, durationSec - release))
+    env.gain.linearRampToValueAtTime(0, queueTime + durationSec)
+    osc.connect(env).connect(masterGain)
+    osc.start(queueTime)
+    osc.stop(queueTime + durationSec + 0.01)
+    activeNodes.add(osc)
+    osc.onended = () => activeNodes.delete(osc)
+  }
+
+  function play(playString) {
+    ensureContext()
+    if (queueTime < ac.currentTime) queueTime = ac.currentTime
+
+    const events = parsePlayString(playString)
+    let tempo = 60
+
+    const start = queueTime
+    for (const e of events) {
+      if (e.type === 'tempo') tempo = e.value
+      else if (e.type === 'volume') {
+        if (typeof e.relative === 'number') runningVolume += e.relative
+        else runningVolume = e.value
+      }
+      else if (e.type === 'octave' || e.type === 'length') { /* baked into note events */ }
+      else if (e.type === 'rest') {
+        queueTime += eventDurationSec(e.length, e.dotMultiplier, tempo)
+      } else if (e.type === 'note') {
+        const dur = eventDurationSec(e.length, e.dotMultiplier, tempo)
+        scheduleTone(noteFrequency(e.name, e.accidental, e.octave), dur, volumeToGain(runningVolume))
+        queueTime += dur
+      } else if (e.type === 'noteNumber') {
+        const dur = eventDurationSec(4, 1, tempo)   // N notes use default length 4
+        scheduleTone(noteNumberFrequency(e.number, e.octave), dur, volumeToGain(runningVolume))
+        queueTime += dur
+      }
+    }
+
+    const totalSec = queueTime - start
+    return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
+  }
+
+  function stop() {
+    if (!ac) return
+    ac.close()
+    ac = null
+    masterGain = null
+    queueTime = 0
+    activeNodes.clear()
+  }
+
+  return { play, stop, resume, suspend, flush }
+}

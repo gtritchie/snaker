@@ -81,7 +81,7 @@ const FONT = {
   '8': G(0,0, 0b00111100, 0b01000010, 0b01000010, 0b00111100, 0b01000010, 0b01000010, 0b01000010, 0b00111100, 0,0),
   '9': G(0,0, 0b00111100, 0b01000010, 0b01000010, 0b01000010, 0b00111110, 0b00000010, 0b01000010, 0b00111100, 0,0),
 
-  ':': G(0,0, 0,0, 0b00011000, 0b00011000, 0,0, 0b00011000, 0b00011000, 0,0, 0,0),
+  ':': G(0,0, 0,            0b00011000, 0b00011000, 0,            0,            0b00011000, 0b00011000, 0,            0,0),
   '?': G(0,0, 0b00111100, 0b01000010, 0b00000010, 0b00000100, 0b00011000, 0b00011000, 0,            0b00011000, 0,0),
   '<': G(0,0, 0b00000110, 0b00011000, 0b01100000, 0b10000000, 0b01100000, 0b00011000, 0b00000110, 0,            0,0),
   '>': G(0,0, 0b01100000, 0b00011000, 0b00000110, 0b00000001, 0b00000110, 0b00011000, 0b01100000, 0,            0,0),
@@ -101,4 +101,10 @@ const EMPTY_GLYPH = G(0,0,0,0,0,0,0,0,0,0,0,0)
 export function getCharGlyph(ch) {
   const upper = ch.toUpperCase()
   return FONT[upper] ?? EMPTY_GLYPH
+}
+
+// Returns the list of characters with explicit glyph definitions. Used by tests to
+// assert every glyph has the expected row count.
+export function getDefinedChars() {
+  return Object.keys(FONT)
 }

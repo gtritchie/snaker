@@ -1,5 +1,5 @@
 import { test, assertEquals, assertDeepEquals } from './harness.js'
-import { decodeSemigraphic, SEMI_COLORS, getCharGlyph, FONT_HEIGHT, FONT_WIDTH } from '../src/glyphs.js'
+import { decodeSemigraphic, SEMI_COLORS, getCharGlyph, getDefinedChars, FONT_HEIGHT, FONT_WIDTH } from '../src/glyphs.js'
 
 // CoCo Semigraphics-4 encoding: byte = code - 128 (7 bits)
 //   bits 6-4: color index (0-7)
@@ -81,4 +81,11 @@ test('getCharGlyph for unknown char returns all-zero (treated as space)', () => 
 test('getCharGlyph for lowercase letter returns same bytes as uppercase', () => {
   // CoCo has no lowercase glyphs; we reuse uppercase. Inversion is a separate flag.
   assertDeepEquals(Array.from(getCharGlyph('a')), Array.from(getCharGlyph('A')))
+})
+
+test('every defined glyph has exactly FONT_HEIGHT rows', () => {
+  for (const ch of getDefinedChars()) {
+    const g = getCharGlyph(ch)
+    assertEquals(g.length, FONT_HEIGHT, `glyph for ${JSON.stringify(ch)}`)
+  }
 })

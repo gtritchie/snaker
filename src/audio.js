@@ -234,30 +234,33 @@ export function createAudio() {
   }
 
   function play(playString) {
-    if (suspended) {
-      // No-op while the tab is hidden: don't schedule oscillators that would all
-      // fire as a burst when the context resumes. The Promise resolves immediately
-      // so the game loop continues at throttled-setTimeout pace.
-      return Promise.resolve()
-    }
-    ensureContext()
-    if (queueTime < ac.currentTime) queueTime = ac.currentTime
+    // State events (tempo, octave, length, volume) are applied even while suspended
+    // so cross-call PLAY state stays consistent. Note/rest events are skipped while
+    // suspended — no oscillators are scheduled and queueTime is not advanced — so
+    // a hidden tab cannot queue a burst that would all fire on resume.
+    if (!suspended) ensureContext()
+    if (ac && queueTime < ac.currentTime) queueTime = ac.currentTime
 
     const events = parsePlayString(playString)
     const start = queueTime
 
     for (const e of events) {
-      if (e.type === 'tempo') {
-        runningTempo = e.value
-      } else if (e.type === 'octave') {
-        runningOctave = e.value
-      } else if (e.type === 'length') {
+      if (e.type === 'tempo') { runningTempo = e.value; continue }
+      if (e.type === 'octave') { runningOctave = e.value; continue }
+      if (e.type === 'length') {
         runningLength = e.value
         runningLengthDots = e.dots
-      } else if (e.type === 'volume') {
+        continue
+      }
+      if (e.type === 'volume') {
         if (typeof e.relative === 'number') runningVolume += e.relative
         else runningVolume = e.value
-      } else if (e.type === 'rest') {
+        continue
+      }
+
+      if (suspended) continue   // skip scheduling for note/rest events while hidden
+
+      if (e.type === 'rest') {
         const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
         queueTime += eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
       } else if (e.type === 'note') {
@@ -274,6 +277,7 @@ export function createAudio() {
       }
     }
 
+    if (suspended) return Promise.resolve()
     const totalSec = queueTime - start
     return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
   }

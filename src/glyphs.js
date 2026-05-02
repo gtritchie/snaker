@@ -113,12 +113,15 @@ export function getDefinedChars() {
 // `x` and `y` are top-left coordinates in canvas pixels (already multiplied by scale).
 //
 // Character code semantics:
-//   32-95 / 97-127: ASCII text (rendered green-on-black)
-//   96:             "blank space" sentinel (the playable empty cell — rendered black)
-//   128-255:        semigraphics color block (see decodeSemigraphic)
+//   32-95:    ASCII uppercase/digit/symbol (rendered green-on-black)
+//   96:       "blank space" sentinel — the playable empty cell, rendered black
+//   128-255:  semigraphics color block (see decodeSemigraphic)
 //
-// `inverse` swaps fg/bg for text cells. Used by the score/best-score screens and
-// by lowercase character runs.
+// `inverse` swaps fg/bg for text cells. Lowercase ASCII codes (97-127) are not
+// expected as direct input here — screen.printAt translates lowercase to uppercase
+// + inverse=true before calling drawCell, preserving CoCo's lowercase = inverse-
+// uppercase convention. If a lowercase code does reach drawCell it will be folded
+// to its uppercase glyph by getCharGlyph and rendered in plain (non-inverse) text.
 export function drawCell(ctx, code, x, y, scale, inverse = false) {
   const w = FONT_WIDTH * scale
   const h = FONT_HEIGHT * scale

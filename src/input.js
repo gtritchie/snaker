@@ -21,6 +21,7 @@ export function createInput(canvas) {
 
   const keyListeners = []
   let lineInputState = null
+  const escListeners = new Set()
 
   function setKbKeyFromEvent(e, down) {
     const k = e.key
@@ -34,6 +35,21 @@ export function createInput(canvas) {
   }
 
   function onKeyDown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      // Clear any orphaned waitForKey listeners so a future keydown can't fire
+      // resolvers whose promises are no longer awaited.
+      keyListeners.length = 0
+      if (lineInputState) {
+        const stale = lineInputState
+        lineInputState = null
+        stale.reject(new Error('lineInput aborted by ESC'))
+      }
+      for (const h of [...escListeners]) {
+        try { h() } catch {}
+      }
+      return
+    }
     setKbKeyFromEvent(e, true)
     if (lineInputState) {
       handleLineInputKey(e)
@@ -160,6 +176,12 @@ export function createInput(canvas) {
     })
   }
 
+  // Register a callback to fire when ESC is pressed. Returns an unsubscribe fn.
+  function onEscape(handler) {
+    escListeners.add(handler)
+    return () => escListeners.delete(handler)
+  }
+
   function destroy() {
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
@@ -171,5 +193,5 @@ export function createInput(canvas) {
     }
   }
 
-  return { getX, getSpeedMs, waitForKey, lineInput, destroy }
+  return { getX, getSpeedMs, waitForKey, lineInput, onEscape, destroy }
 }

@@ -24,7 +24,53 @@ export function formatScore(ticks) {
   return mm + ':' + ss
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms))
+// Abort plumbing: ESC key fires fireAbort(), which rejects every in-flight
+// `tracked()` Promise with GameAbortedError. The runGame outer loop catches
+// this and restarts from the pre-title screen.
+class GameAbortedError extends Error {
+  constructor() { super('game aborted'); this.name = 'GameAbortedError' }
+}
+
+const abortRejecters = new Set()
+
+function fireAbort() {
+  const list = [...abortRejecters]
+  abortRejecters.clear()
+  for (const r of list) {
+    try { r() } catch {}
+  }
+}
+
+// Wrap a promise so that fireAbort() rejects it with GameAbortedError. The
+// underlying promise is left to settle on its own; if it resolves after the
+// wrapper has already rejected, the resolution is ignored.
+function tracked(promise) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const rejecter = () => {
+      if (settled) return
+      settled = true
+      reject(new GameAbortedError())
+    }
+    abortRejecters.add(rejecter)
+    Promise.resolve(promise).then(
+      v => {
+        if (settled) return
+        settled = true
+        abortRejecters.delete(rejecter)
+        resolve(v)
+      },
+      e => {
+        if (settled) return
+        settled = true
+        abortRejecters.delete(rejecter)
+        reject(e)
+      },
+    )
+  })
+}
+
+const sleep = ms => tracked(new Promise(r => setTimeout(r, ms)))
 
 // Original Bublitchki melody — copied verbatim from snaker.bas line 50.
 const TITLE_MUSIC = "T4 O3 V25 L8 D G A L4 B L8 A G P8 O4 D C# C O3 L4 B L8 A G P8 D G B O4 L4 D L8 C# L4 D O3 L8 B A G L4... B L8 B O4 E D# L4 E O3 L8 B L4 O4 C L8 O3 B O4 D C L4 O3 B L8 A L4 G L8 B O4 D C O3 B P8 A L4 B L8 A G F# E P8 B P4 O4 E"
@@ -50,6 +96,24 @@ export async function runGame(canvas, registerAudio = () => {}) {
 
   window.addEventListener('resize', () => pickInitialScale(screen))
 
+  // ESC during play aborts whatever's awaiting and returns to the pre-title.
+  input.onEscape(() => {
+    audio.flush()
+    fireAbort()
+  })
+
+  while (true) {
+    try {
+      await runMainFlow(screen, audio, input)
+      return   // user chose N to quit
+    } catch (err) {
+      if (err instanceof GameAbortedError) continue   // ESC pressed; restart
+      throw err
+    }
+  }
+}
+
+async function runMainFlow(screen, audio, input) {
   await titleScreen(screen, audio, input)
 
   let bestTicks = (loadBestScore()?.ticks) ?? Infinity
@@ -90,10 +154,10 @@ async function winSequence(screen, audio) {
   audio.flush()
   for (const phrase of WIN_PHRASES) {
     screen.cls(rnd(8))
-    await audio.play(phrase)
-    await audio.play(ARPEGGIO)
+    await tracked(audio.play(phrase))
+    await tracked(audio.play(ARPEGGIO))
   }
-  await audio.play("V15")
+  await tracked(audio.play("V15"))
 }
 
 async function showScore(screen, audio, elapsed) {
@@ -109,7 +173,7 @@ async function showScore(screen, audio, elapsed) {
   // BASIC lines 570-580: ascending chromatic 5 octaves x 12 notes.
   for (let o = 1; o <= 5; o++) {
     for (let n = 1; n <= 12; n++) {
-      await audio.play(`T255 O${o} N${n}`)
+      await tracked(audio.play(`T255 O${o} N${n}`))
     }
   }
   await sleep(1500)  // BASIC FOR PP=1 TO 1800 — calibrate to taste in Task 16
@@ -122,7 +186,7 @@ async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
   screen.printAt(0, 'WHAT IS YOUR NAME')
 
   let name = ''
-  await input.lineInput({
+  await tracked(input.lineInput({
     maxLength: 12,
     render(buffer) {
       const promptOffset = 32
@@ -134,7 +198,7 @@ async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
       if (cursorPos < promptOffset + 32) screen.poke(1024 + cursorPos, 143)
       name = buffer
     },
-  })
+  }))
   saveBestScore({ name: name.toUpperCase(), ticks: elapsed, displayTime })
   void audio
 }
@@ -154,7 +218,7 @@ async function showBestScore(screen, audio) {
 
   for (let o = 5; o >= 1; o--) {
     for (let n = 12; n >= 1; n--) {
-      await audio.play(`T255 O${o} N${n}`)
+      await tracked(audio.play(`T255 O${o} N${n}`))
     }
   }
   await sleep(2000)
@@ -168,7 +232,7 @@ async function playAgainPrompt(screen, audio, input) {
   screen.printAt(0, 'ANOTHER GAME (Y/N)')
 
   while (true) {
-    const k = (await input.waitForKey()).toUpperCase()
+    const k = (await tracked(input.waitForKey())).toUpperCase()
     if (k === 'Y') return true
     if (k === 'N') return false
     audio.flush()
@@ -330,7 +394,7 @@ async function titleScreen(screen, audio, input) {
   // black text on a uniform green background.
   for (let i = 0; i < 512; i++) screen.poke(1024 + i, 32) // code 32 = solid green block
   screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM', { inverse: true })
-  await input.waitForKey()
+  await tracked(input.waitForKey())
   await audio.resume()
 
   // Title screen artwork — mirrors snaker.bas line 40:
@@ -347,10 +411,10 @@ async function titleScreen(screen, audio, input) {
 
   // Play the Bublitchki melody in full, like the original BASIC's blocking PLAY
   // on line 50. Then show the start prompt and wait for the player.
-  await audio.play(TITLE_MUSIC)
+  await tracked(audio.play(TITLE_MUSIC))
 
   screen.printAt(480, '<<press ANY key TO START>>')
-  await input.waitForKey()
+  await tracked(input.waitForKey())
 }
 
 async function setup(screen, audio) {
@@ -362,8 +426,8 @@ async function setup(screen, audio) {
   screen.cls(0)
   for (let p = 1024; p <= 1504; p += 32) {
     screen.poke(p, 175)
-    await audio.play("T255 O4 A B")
+    await tracked(audio.play("T255 O4 A B"))
     screen.poke(p + 31, 175)
-    await audio.play("O4 E")
+    await tracked(audio.play("O4 E"))
   }
 }

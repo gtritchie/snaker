@@ -101,8 +101,22 @@ export function createScreen(canvas) {
     redrawAll()
   }
 
+  // Scroll the entire screen up by one row. Original CoCo behavior triggered when
+  // PRINT@511 wraps the cursor past the screen end. Used by the gameplay loop to
+  // make rows of cars rise visually as new cars are added at the bottom row.
+  function scrollUp() {
+    vram.copyWithin(0, 32, VRAM_SIZE)
+    inverseFlags.copyWithin(0, 32, VRAM_SIZE)
+    const lastRow = VRAM_SIZE - COLS
+    for (let i = lastRow; i < VRAM_SIZE; i++) {
+      vram[i] = 96
+      inverseFlags[i] = 0
+    }
+    redrawAll()
+  }
+
   return {
-    setScale, poke, peek, printAt, cls, redrawAll, setInverted,
+    setScale, poke, peek, printAt, cls, redrawAll, setInverted, scrollUp,
     get scale() { return scale },
   }
 }

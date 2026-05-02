@@ -249,6 +249,12 @@ async function singleDescent(screen, audio, input, init) {
         screen.poke(1504 + rnd(30), COLOR_BLOCKS[rnd(5) - 1])
         screen.poke(1504, 175)
         screen.poke(1535, 175)
+
+        // Scroll the whole screen up by one row, matching the original BASIC's
+        // PRINT@511,CHR$(175); trick. Cars and walls just placed on row 15 rise
+        // visually each iteration; the snake byte placed at playerPos rolls
+        // off the top, leaving playerPos as a fresh empty cell next iteration.
+        screen.scrollUp()
       }
     }
 

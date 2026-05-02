@@ -63,6 +63,62 @@ export function createInput(canvas) {
     lineInputState.render(lineInputState.buffer)
   }
 
+  // ---- touch joystick ----
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  let touchActive = false
+  let touchCenter = null    // {x, y} in canvas-local pixels
+  let touchPos = null
+
+  function onTouchStart(e) {
+    if (e.touches.length === 0) return
+    const t = e.touches[0]
+    const rect = canvas.getBoundingClientRect()
+    touchCenter = { x: t.clientX - rect.left, y: t.clientY - rect.top }
+    touchPos = { ...touchCenter }
+    touchActive = true
+    e.preventDefault()
+    if (lineInputState === null && keyListeners.length > 0) {
+      const resolvers = keyListeners.splice(0)
+      for (const r of resolvers) r(' ')
+    }
+    updateKeysFromTouch()
+  }
+
+  function onTouchMove(e) {
+    if (!touchActive || e.touches.length === 0) return
+    const t = e.touches[0]
+    const rect = canvas.getBoundingClientRect()
+    touchPos = { x: t.clientX - rect.left, y: t.clientY - rect.top }
+    updateKeysFromTouch()
+    e.preventDefault()
+  }
+
+  function onTouchEnd(e) {
+    touchActive = false
+    touchCenter = null
+    touchPos = null
+    keys.left = keys.right = keys.up = keys.down = false
+    e.preventDefault()
+  }
+
+  function updateKeysFromTouch() {
+    if (!touchActive || !touchCenter || !touchPos) return
+    const dx = touchPos.x - touchCenter.x
+    const dy = touchPos.y - touchCenter.y
+    const deadZone = 16
+    keys.left  = dx < -deadZone
+    keys.right = dx >  deadZone
+    keys.up    = dy < -deadZone
+    keys.down  = dy >  deadZone
+  }
+
+  if (isTouchDevice) {
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false })
+    canvas.addEventListener('touchmove',  onTouchMove,  { passive: false })
+    canvas.addEventListener('touchend',   onTouchEnd,   { passive: false })
+    canvas.addEventListener('touchcancel', onTouchEnd,  { passive: false })
+  }
+
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 
@@ -90,6 +146,12 @@ export function createInput(canvas) {
   function destroy() {
     window.removeEventListener('keydown', onKeyDown)
     window.removeEventListener('keyup', onKeyUp)
+    if (isTouchDevice) {
+      canvas.removeEventListener('touchstart', onTouchStart)
+      canvas.removeEventListener('touchmove', onTouchMove)
+      canvas.removeEventListener('touchend', onTouchEnd)
+      canvas.removeEventListener('touchcancel', onTouchEnd)
+    }
   }
 
   return { getX, getSpeedMs, waitForKey, lineInput, destroy }

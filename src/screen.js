@@ -36,11 +36,14 @@ export function createScreen(canvas) {
     const row = Math.floor(offset / COLS)
     const x = col * FONT_WIDTH * scale
     const y = row * FONT_HEIGHT * scale
-    const code = vram[offset]
+    // Treat zero-filled (uninitialized) VRAM as code 32 so the inverse computation
+    // and the drawCell call see the same code — keeps the substituted space's
+    // intrinsic green-block bg consistent.
+    const renderCode = vram[offset] === 0 ? 32 : vram[offset]
     // Compose: per-cell force flag OR intrinsic VDG inverse, then XOR global crash flash.
-    const natural = naturalInverse(code, !!inverseFlags[offset])
+    const natural = naturalInverse(renderCode, !!inverseFlags[offset])
     const effective = natural !== inverted
-    drawCell(ctx, code === 0 ? 32 : code, x, y, scale, effective)
+    drawCell(ctx, renderCode, x, y, scale, effective)
   }
 
   function offsetOf(addr) {

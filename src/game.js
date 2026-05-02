@@ -318,28 +318,33 @@ async function celebrateRun(screen, audio) {
 }
 
 async function titleScreen(screen, audio, input) {
-  // Mirrors snaker.bas line 40:
+  // Pre-title gateway. Browsers block audio autoplay until the user has interacted
+  // with the page, so we show a plain "RUN" prompt first and use that key press
+  // to resume the AudioContext. The original CoCo experience started with a
+  // similar moment: typing RUN at the BASIC prompt to launch the program.
+  screen.cls(0)
+  screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM')
+  await input.waitForKey()
+  await audio.resume()
+
+  // Title screen artwork — mirrors snaker.bas line 40:
   //   CLS RND(4)+1
   //   PRINT@192,STRING$(32,"%")
   //   PRINT@224,STRING$(13,255)
   //   PRINT@237,"snaker";STRING$(13,255);STRING$(32,"%")
   screen.cls(rnd(4) + 1)
-
   for (let i = 0; i < 32; i++) screen.poke(1024 + 192 + i, 37)         // '%' top row
   for (let i = 0; i < 13; i++) screen.poke(1024 + 224 + i, 255)        // orange blocks left of "snaker"
   screen.printAt(237, 'snaker')                                         // PRINT@237 → cols 13-18 of row 7
   for (let i = 0; i < 13; i++) screen.poke(1024 + 243 + i, 255)        // orange blocks right of "snaker"
   for (let i = 0; i < 32; i++) screen.poke(1024 + 256 + i, 37)         // '%' row below
 
-  screen.printAt(480, '<<press ANY key TO START>>')
+  // Play the Bublitchki melody in full, like the original BASIC's blocking PLAY
+  // on line 50. Then show the start prompt and wait for the player.
+  await audio.play(TITLE_MUSIC)
 
-  // First user gesture resumes audio. Music starts after the gesture so mobile
-  // browsers do not block it. A second key press dismisses the title.
+  screen.printAt(480, '<<press ANY key TO START>>')
   await input.waitForKey()
-  await audio.resume()
-  audio.play(TITLE_MUSIC)
-  await input.waitForKey()
-  audio.flush()   // drop any remaining title music so setup beeps don't queue behind it
 }
 
 async function setup(screen, audio) {

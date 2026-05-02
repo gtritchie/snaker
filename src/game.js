@@ -107,7 +107,12 @@ export async function runGame(canvas, registerAudio = () => {}) {
       await runMainFlow(screen, audio, input)
       return   // user chose N to quit
     } catch (err) {
-      if (err instanceof GameAbortedError) continue   // ESC pressed; restart
+      if (err instanceof GameAbortedError) {
+        // Reset transient screen state — crashHandler may have aborted between
+        // setInverted(true) and setInverted(false), leaving the playfield flipped.
+        screen.setInverted(false)
+        continue   // ESC pressed; restart from the pre-title
+      }
       throw err
     }
   }

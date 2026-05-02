@@ -54,10 +54,27 @@ export async function runGame(canvas, registerAudio = () => {}) {
   while (true) {
     await setup(screen, audio)
     const elapsed = await playRounds(screen, audio, input)
-    // win, score, persistence, again — wired up in Task 14-15.
+    await winSequence(screen, audio)
+    // score, persistence, again — wired up in Task 15.
     void elapsed
     return
   }
+}
+
+const WIN_PHRASES = [
+  "V7  O2 T2 L8 F A O3 B C L4 F L8 C L4. F",
+  "V>  O2 T2 L8 A O3 C E L4. G L8 E L4. G",
+  "V>  O3 T2 L8 C F A O4 L4 C O5 L8 A O4 L4. C",
+]
+const ARPEGGIO = "T255 O1 E F G B C A E D A G F C E D C B G E A D D A B C G E A D G C A E F E B C E D G A E D B C D E D G B C E D C"
+
+async function winSequence(screen, audio) {
+  for (const phrase of WIN_PHRASES) {
+    screen.cls(rnd(8))
+    await audio.play(phrase)
+    await audio.play(ARPEGGIO)
+  }
+  await audio.play("V15")
 }
 
 // Color block codes from BASIC line 30 DATA: 159, 191, 207, 239, 255.

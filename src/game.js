@@ -375,12 +375,17 @@ async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
 }
 
 async function celebrateRun(screen, audio) {
-  // BASIC lines 390-400: 15 quick beeps, then re-seal bottom-row edges.
+  // BASIC lines 390-400: 15 quick beeps with the same POKE 1504,175 + PRINT@511
+  // pattern as the descent loop. The PRINT@511 scrolls the screen up each
+  // iteration, so the playfield is wiped clean by the end of the celebration
+  // and the next descent starts on a freshly scrolled wall field rather than
+  // the stale snake/obstacle state from the previous run.
   for (let i = 0; i < 15; i++) {
     audio.flush()
     audio.play("O4 T255 A B E")
     screen.poke(1504, 175)
     screen.poke(1535, 175)
+    screen.scrollUp()
     await sleep(20)
   }
   screen.poke(1504, 175)

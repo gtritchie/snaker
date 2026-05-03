@@ -1,6 +1,6 @@
 # Embeddable snaker engine — design
 
-**Status:** in progress (sections being added incrementally; not yet user-approved as a whole)
+**Status:** draft — all sections written, awaiting user review
 **Date:** 2026-05-03
 
 ## Background
@@ -60,7 +60,7 @@ export function boot(canvas, options = {}) { … }
 
 **Return value**
 
-- Returns a `destroy` function. Calling it tears down everything `boot()` set up: DOM listeners, the `ResizeObserver`, audio (suspend/close), in-flight `tracked()` promises (via `fireAbort()`), and inline styles applied to the canvas.
+- Returns a `destroy` function. Calling it tears down everything `boot()` set up: DOM listeners, the `ResizeObserver`, audio (suspended, not closed — see Section 5), in-flight `tracked()` promises (via `fireAbort()`), and inline styles applied to the canvas.
 - `destroy` is idempotent — a second call is a no-op.
 
 **Re-entrancy**
@@ -375,7 +375,7 @@ export async function runGame(canvas, registerAudio = () => {}) {
 
 The inner gameplay helpers (`runMainFlow`, `playRounds`, `singleDescent`, `crashHandler`, `winSequence`, `showScore`, etc.) currently reach for the module-level `tracked` / `sleep` directly. They need to receive these as closure references — either by being defined inside `runGame()` (smallest diff, but inflates the function past the 100-line limit) or by being top-level functions that take a `{ tracked, sleep }` context object as an extra argument.
 
-Recommendation: thread a `ctx = { tracked, sleep, audio, screen, input }` object through the helpers. Most already take some subset of those; consolidating into a single `ctx` arg keeps signatures clean and stays under the per-function line limit. Concrete refactor approach is a Section-7 implementation detail; the design contract is that **abort scope is per-`runGame()` instance**.
+Recommendation: thread a `ctx = { tracked, sleep, audio, screen, input }` object through the helpers. Most already take some subset of those; consolidating into a single `ctx` arg keeps signatures clean and stays under the per-function line limit. Concrete refactor mechanics are an implementation detail (see "Implementation summary" at the end of this doc); the design contract is that **abort scope is per-`runGame()` instance**.
 
 `destroy()` calls the instance's `fireAbort()` only. Other booted canvases on the same page are unaffected.
 
@@ -412,12 +412,13 @@ while (!destroyed) {
 3. Disconnect `ResizeObserver` (no more scale recomputes).
 4. Remove `document` `visibilitychange` listener.
 5. Remove canvas `mousedown` focus helper.
-6. Call `input.destroy()` (removes canvas key/touch listeners).
-7. `audio.flush()` then `audio.suspend()` (cancel scheduled oscillators, then suspend context).
-8. `fireAbort()` (rejects in-flight `tracked()` promises; runGame loop returns).
-9. Restore inline styles from snapshot.
-10. Restore `tabindex` attribute state.
-11. `activeCanvases.delete(canvas)`.
+6. Call the `onEscape` unsubscribe captured at boot (`game.js:117`) so the Esc-fires-fireAbort handler is detached.
+7. Call `input.destroy()` (removes canvas key/touch listeners).
+8. `audio.flush()` then `audio.suspend()` (cancel scheduled oscillators, then suspend context).
+9. `fireAbort()` (rejects in-flight `tracked()` promises; runGame loop returns).
+10. Restore inline styles from snapshot.
+11. Restore `tabindex` attribute state.
+12. `activeCanvases.delete(canvas)`.
 
 Listener removal precedes the abort so no new events can land mid-teardown. Audio teardown precedes abort so no fresh `audio.play()` can fire from a still-running iteration.
 

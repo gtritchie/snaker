@@ -328,12 +328,58 @@ The host div sizes the canvas; `boot()` applies the three inline styles; the eng
 | Canvas `keydown`/`keyup`/`touch*` listeners (`src/input.js`) | `createInput` closure | call existing `input.destroy()` |
 | `ResizeObserver` on container (Section 2) | `boot` closure | `ro.disconnect()` |
 | `input.onEscape(...)` registration (`src/game.js:117`) | `createInput` Set | call the unsubscribe returned by `onEscape` |
-| Pending `tracked()` rejecters in `game.js`'s module-level `Set` | `tracked` | `fireAbort()` rejects them all |
+| Pending `tracked()` rejecters | per-`runGame()` `Set` (see below) | call instance's `fireAbort()` |
 | `runGame()`'s `while (true)` loop | `runGame` | needs a destroy flag — see below |
 | Audio scheduling state + `AudioContext` running state | `createAudio` | `audio.flush(); audio.suspend()` |
 | Inline styles on canvas (3 properties, Section 4) | `boot` closure | restore from snapshot |
 | `canvas.tabIndex = 0` (Section 3, only if we set it) | `boot` closure | restore prior `hasAttribute('tabindex')` state |
 | Active-canvas entry in module-level `WeakMap` (Section 1) | `boot` module | `weakMap.delete(canvas)` |
+
+**Per-instance abort plumbing**
+
+Today `abortRejecters`, `fireAbort()`, and `tracked()` live at module scope in `src/game.js` (lines 44, 46-59, 64-88), so a single `Set` is shared across every game running in the page. With multiple embedded canvases this would cross-pollute: destroying one instance would reject in-flight `tracked()` promises in unrelated instances.
+
+Move the abort plumbing inside `runGame()`'s closure so each booted instance owns its own `Set` of rejecters and its own `fireAbort` / `tracked` / `sleep`:
+
+```js
+export async function runGame(canvas, registerAudio = () => {}) {
+  const abortRejecters = new Set()
+
+  const fireAbort = () => {
+    const list = [...abortRejecters]
+    abortRejecters.clear()
+    for (const r of list) {
+      try { r() } catch (err) { console.warn('fireAbort: rejecter threw:', err) }
+    }
+  }
+
+  const tracked = (promise) => new Promise((resolve, reject) => {
+    let settled = false
+    const rejecter = () => {
+      if (settled) return
+      settled = true
+      reject(new GameAbortedError())
+    }
+    abortRejecters.add(rejecter)
+    Promise.resolve(promise).then(
+      v => { if (!settled) { settled = true; abortRejecters.delete(rejecter); resolve(v) } },
+      e => { if (!settled) { settled = true; abortRejecters.delete(rejecter); reject(e) } },
+    )
+  })
+
+  const sleep = (ms) => tracked(new Promise(r => setTimeout(r, ms)))
+
+  // …rest of runGame, threading tracked/sleep to inner helpers as needed.
+}
+```
+
+The inner gameplay helpers (`runMainFlow`, `playRounds`, `singleDescent`, `crashHandler`, `winSequence`, `showScore`, etc.) currently reach for the module-level `tracked` / `sleep` directly. They need to receive these as closure references — either by being defined inside `runGame()` (smallest diff, but inflates the function past the 100-line limit) or by being top-level functions that take a `{ tracked, sleep }` context object as an extra argument.
+
+Recommendation: thread a `ctx = { tracked, sleep, audio, screen, input }` object through the helpers. Most already take some subset of those; consolidating into a single `ctx` arg keeps signatures clean and stays under the per-function line limit. Concrete refactor approach is a Section-7 implementation detail; the design contract is that **abort scope is per-`runGame()` instance**.
+
+`destroy()` calls the instance's `fireAbort()` only. Other booted canvases on the same page are unaffected.
+
+**`GameAbortedError`** stays a module-level class — it's just a marker type, no instance state.
 
 **Stopping the `while (true)` loop**
 

@@ -458,7 +458,7 @@ Add a new top-level section to `README.md` titled **"Embedding"**, structured as
 
 **Container sizing rules.**
 - The engine renders at integer scale only.
-- Width is required; height optional. With both, scale = `min(floor(W/256), floor(H/192))`. With width only (or a parent whose height is contributed by the canvas itself), scale = `floor(W/256)`.
+- Width is required; height optional. With both, scale = `min(max(1, floor(W/256)), max(1, floor(H/192)))`. With width only (or a parent whose height is contributed by the canvas itself), scale = `max(1, floor(W/256))`. The `max(1, …)` clamp guarantees the canvas always renders at least at native resolution, even in containers narrower than 256 px or shorter than 192 px.
 - Resize the container freely — a `ResizeObserver` re-scales the canvas. Browser viewport resize propagates if the container's size depends on viewport units.
 
 **SPA cleanup pattern.** Document the Astro `ClientRouter` case:
@@ -506,8 +506,9 @@ Per the chosen scope (**surgical patch + brief README section, no tests**), this
 | 14 | Call `boot()` twice without `destroy()` between | Throws clear "already has an active instance" error |
 | 15 | Call `destroy()` twice | Second call is a no-op; no errors |
 | 16 | Boot two canvases on the same page; destroy one | Surviving canvas keeps playing; destroyed one stops cleanly |
+| 17 | Boot with `options.container` pointing at an ancestor that is *not* `canvas.parentElement` (e.g. canvas wrapped in a presentational `<figure>` inside a sized `<section>`; pass the `<section>`) | Sizing tracks the explicit container, not the parent; `ResizeObserver` fires on the section's resize, not the figure's |
 
-Scenario 16 specifically validates the per-instance abort scoping from Section 5.
+Scenario 16 specifically validates the per-instance abort scoping from Section 5. Scenario 17 validates that `options.container` actually overrides the `parentElement` default.
 
 ---
 

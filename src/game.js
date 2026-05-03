@@ -432,7 +432,9 @@ async function titleScreen(screen, audio, input) {
   for (let i = 0; i < 512; i++) screen.poke(1024 + i, 32) // code 32 = solid green block
   screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM')
   await tracked(input.waitForKey())
-  await audio.resume()
+  await audio.resume().catch(err => {
+    console.warn('audio: resume blocked, continuing muted:', err)
+  })
 
   // Title screen artwork — mirrors snaker.bas line 40:
   //   CLS RND(4)+1
@@ -459,7 +461,9 @@ async function setup(screen, audio) {
   // with stepped tones. We await each play() so the visual pacing matches the audio
   // (the original BASIC's PLAY blocks). Without awaiting, fire-and-forget plays
   // queue many seconds of audio behind a sub-second visual loop.
-  await audio.resume()
+  await audio.resume().catch(err => {
+    console.warn('audio: resume blocked, continuing muted:', err)
+  })
   screen.cls(0)
   for (let p = 1024; p <= 1504; p += 32) {
     screen.poke(p, 175)

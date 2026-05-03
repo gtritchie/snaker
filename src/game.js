@@ -147,7 +147,7 @@ async function runMainFlow(screen, audio, input) {
     const displayTime = await showScore(screen, audio, elapsed)
     if (elapsed < bestTicks) {
       bestTicks = elapsed
-      await captureNewBestScore(screen, audio, input, elapsed, displayTime)
+      await captureNewBestScore(screen, input, elapsed, displayTime)
     }
     await showBestScore(screen, audio)
     if (!(await playAgainPrompt(screen, audio, input))) {
@@ -208,7 +208,7 @@ async function showScore(screen, audio, elapsed) {
   return timeStr
 }
 
-async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
+async function captureNewBestScore(screen, input, elapsed, displayTime) {
   // BASIC line 790: PRINT"WHAT IS YOUR NAME";:LINE INPUT">>>>?";N$
   // The trailing semicolon on PRINT suppresses the carriage return, so ">>>>?" and
   // the user's input continue on the same row right after the prompt.
@@ -233,7 +233,6 @@ async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
     },
   }))
   saveBestScore({ name: name.toUpperCase(), ticks: elapsed, displayTime })
-  void audio
 }
 
 async function showBestScore(screen, audio) {

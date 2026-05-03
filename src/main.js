@@ -8,8 +8,10 @@ export function boot(canvas) {
   // continue playing — both undesirable.
   const onVisibility = () => {
     if (!audioRef) return
-    if (document.visibilityState === 'hidden') audioRef.suspend()
-    else audioRef.resume()
+    const promise = document.visibilityState === 'hidden'
+      ? audioRef.suspend()
+      : audioRef.resume()
+    promise.catch(err => console.warn('audio: visibility toggle failed:', err))
   }
   document.addEventListener('visibilitychange', onVisibility)
 

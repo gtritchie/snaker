@@ -431,4 +431,96 @@ Listener removal precedes the abort so no new events can land mid-teardown. Audi
 
 Currently (`src/input.js:200-209`) it removes window-scoped listeners. Per Section 3 those move to canvas, so this updates accordingly. No new public surface.
 
-## Section 6 — *(pending)*
+## Section 6 — README "Embedding" section + iframe note + tests strategy
+
+### README content
+
+Add a new top-level section to `README.md` titled **"Embedding"**, structured as follows:
+
+**Quick start.** Show the success-criteria snippet verbatim:
+
+```html
+<div style="width: 768px; aspect-ratio: 4/3;">
+  <canvas id="snaker"></canvas>
+</div>
+<script type="module">
+  import { boot } from './snaker/main.js'
+  boot(document.getElementById('snaker'))
+</script>
+```
+
+**API reference.** Document `boot(canvas, options?) → destroy`:
+- `canvas` — required `HTMLCanvasElement`, must be in the DOM (or supply `options.container`).
+- `options.container` — `Element` to size against. Defaults to `canvas.parentElement`.
+- Returns a `destroy()` function. Idempotent. Tears down listeners, observers, audio, and restores the canvas's pre-`boot()` style state.
+- Throws on re-entry: calling `boot()` on the same canvas without `destroy()` first throws with a clear message.
+
+**Container sizing rules.**
+- The engine renders at integer scale only.
+- Width is required; height optional. With both, scale = `min(floor(W/256), floor(H/192))`. With width only (or a parent whose height is contributed by the canvas itself), scale = `floor(W/256)`.
+- Resize the container freely — a `ResizeObserver` re-scales the canvas. Browser viewport resize propagates if the container's size depends on viewport units.
+
+**SPA cleanup pattern.** Document the Astro `ClientRouter` case:
+
+```js
+const destroy = boot(canvas)
+document.addEventListener('astro:before-swap', destroy, { once: true })
+```
+
+Equivalent patterns for any router that fires a "view will unmount" event work.
+
+**Browser support.** Requires `ResizeObserver` and Web Audio (modern evergreen browsers; everything Snaker already needed plus `ResizeObserver`).
+
+### Cross-origin iframe note
+
+A short callout in the README:
+
+> **Cross-origin iframe hosts** must set `allow="autoplay"` on the `<iframe>` for the title music to play. Same-origin embeds (script/module imports from the same origin) are unaffected; the engine's existing first-keypress audio-unlock handles autoplay restrictions.
+
+Not adding any iframe-detection logic in code — the user's host (`boringbydesign.ca`) is same-origin direct embed, and per the prompt this is YAGNI.
+
+### Tests strategy
+
+Per the chosen scope (**surgical patch + brief README section, no tests**), this refactor adds no new files in `tests/`. Justification:
+- The existing in-browser harness (`tests/harness.js`, `tests.html`) has no DOM-mocking infrastructure and no headless runner — testing `ResizeObserver` callbacks, focus behavior, or container sizing in-browser would require building a fixtures system that doesn't currently exist.
+- The CLAUDE.md "no linter, no type checker" verify loop already prescribes manual browser smoke testing for UI changes.
+
+**Manual verification plan** for the implementer (must pass before merging):
+
+| # | Scenario | Expected |
+| --- | --- | --- |
+| 1 | Open `index.html` standalone | Game runs; title sequence and gameplay identical to pre-refactor |
+| 2 | Open `tests.html` | All existing tests still pass |
+| 3 | Embed in a `width: 768px; aspect-ratio: 4/3` div on a host page | Canvas scales to 3× (768/256); centered in wrapper |
+| 4 | Embed in a `width: 600px` div with no height/aspect-ratio | Canvas scales to 2× via width-only fallback; wrapper grows to fit |
+| 5 | Resize the wrapper (CSS or DevTools) | Canvas re-scales at integer steps within ~1 frame |
+| 6 | Type arrow keys / WASD with focus on the host page (not canvas) | Page scrolls / shortcuts fire; game does not capture |
+| 7 | Click the canvas; type same keys | Game responds; page does not scroll |
+| 8 | Tab away from canvas; type keys | Game ignores; page handles |
+| 9 | Touch-drag inside canvas on mobile | Joystick responds; page does not scroll |
+| 10 | Touch-drag outside canvas on mobile | Page scrolls normally |
+| 11 | Press Esc during play | Game aborts to pre-title (existing behavior) |
+| 12 | Switch tabs during play | Audio pauses (existing behavior) |
+| 13 | Call `destroy()` then `boot()` again on the same canvas | Game re-initializes cleanly; no console errors |
+| 14 | Call `boot()` twice without `destroy()` between | Throws clear "already has an active instance" error |
+| 15 | Call `destroy()` twice | Second call is a no-op; no errors |
+| 16 | Boot two canvases on the same page; destroy one | Surviving canvas keeps playing; destroyed one stops cleanly |
+
+Scenario 16 specifically validates the per-instance abort scoping from Section 5.
+
+---
+
+## Implementation summary
+
+Files touched, in dependency order:
+
+| File | Change | Approx. LOC delta |
+| --- | --- | --- |
+| `src/screen.js` | Early-return in `setScale` when scale unchanged | +2 |
+| `src/input.js` | Listeners on canvas, not window; `destroy()` updated | ~5 swaps, no net growth |
+| `src/game.js` | Per-instance `tracked`/`sleep`/`fireAbort`; `destroyed` flag; `pickInitialScale` → `computeScale(container, canvas)`; threaded `ctx` arg through helpers | +30, -10 |
+| `src/main.js` | `boot(canvas, options?)` returns `destroy`; snapshot styles; `tabindex` setup; `ResizeObserver`; mousedown focus helper; visibility-listener wired into destroy; `WeakMap` re-entry guard | +50, -5 |
+| `index.html` | Strip non-essential CSS, drop canvas dimension attrs | -10 |
+| `README.md` | Add "Embedding" section | +60 |
+
+No new files. No new dependencies. No build step changes.

@@ -84,7 +84,7 @@ export function createScreen(canvas) {
   }
 ```
 
-- [ ] **Step 2: Initialize canvas dimensions explicitly in `createScreen`, AFTER `imageSmoothingEnabled`**
+- [ ] **Step 2: Initialize canvas dimensions in `createScreen`, then set `imageSmoothingEnabled`**
 
 The order matters: assigning `canvas.width` (or `canvas.height`) resets the 2D context state, which means `imageSmoothingEnabled` flips back to its default `true`. So the initial `imageSmoothingEnabled = false` must be set **after** the dimension assignments — otherwise a first `setScale(1)` call early-returns and the canvas renders with smoothing on, blurring the pixel art.
 

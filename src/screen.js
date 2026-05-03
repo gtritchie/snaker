@@ -12,6 +12,7 @@ export const NATIVE_HEIGHT = ROWS * FONT_HEIGHT  // 192
 // Resize the underlying canvas with setScale(); the screen redraws automatically.
 export function createScreen(canvas) {
   const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D context unavailable')
   ctx.imageSmoothingEnabled = false
 
   const vram = new Uint8Array(VRAM_SIZE)

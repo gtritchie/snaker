@@ -84,18 +84,34 @@ export function createScreen(canvas) {
   }
 ```
 
-- [ ] **Step 2: Initialize canvas dimensions explicitly in `createScreen`**
+- [ ] **Step 2: Initialize canvas dimensions explicitly in `createScreen`, AFTER `imageSmoothingEnabled`**
 
-Find the line `ctx.imageSmoothingEnabled = false` near the top of `createScreen` (line 16). Insert two new lines immediately after it:
+The order matters: assigning `canvas.width` (or `canvas.height`) resets the 2D context state, which means `imageSmoothingEnabled` flips back to its default `true`. So the initial `imageSmoothingEnabled = false` must be set **after** the dimension assignments — otherwise a first `setScale(1)` call early-returns and the canvas renders with smoothing on, blurring the pixel art.
+
+Find the existing block:
 
 ```js
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D context unavailable')
   ctx.imageSmoothingEnabled = false
+
+  const vram = new Uint8Array(VRAM_SIZE)
+```
+
+Replace with:
+
+```js
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D context unavailable')
 
   // Make the backing store match scale=1 explicitly, so a setScale(1) call is
   // correctly a no-op (rather than the canvas staying at the browser default
-  // 300x150 after index.html drops its width/height attrs).
+  // 300x150 after index.html drops its width/height attrs). Set
+  // imageSmoothingEnabled AFTER the resize — assigning canvas.width resets
+  // the 2D context state, so an earlier set would be wiped.
   canvas.width = NATIVE_WIDTH
   canvas.height = NATIVE_HEIGHT
+  ctx.imageSmoothingEnabled = false
 
   const vram = new Uint8Array(VRAM_SIZE)
 ```

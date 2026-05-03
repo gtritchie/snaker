@@ -163,12 +163,15 @@ Two coupled changes:
 export function createScreen(canvas) {
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D context unavailable')
-  ctx.imageSmoothingEnabled = false
 
   // Make the backing store match scale=1 explicitly, so a setScale(1) call is
   // correctly a no-op (rather than the canvas staying at the browser default).
+  // Reassigning canvas.width resets the 2D context state, so set
+  // imageSmoothingEnabled AFTER the resize — otherwise a first setScale(1)
+  // early-return would leave smoothing on and blur the pixel art.
   canvas.width = NATIVE_WIDTH
   canvas.height = NATIVE_HEIGHT
+  ctx.imageSmoothingEnabled = false
 
   const vram = new Uint8Array(VRAM_SIZE)
   let scale = 1

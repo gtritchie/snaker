@@ -46,22 +46,35 @@ Leave it running through all tasks.
 
 ---
 
-## Task 1: `setScale` early-return in `src/screen.js`
+## Task 1: Initialize canvas dimensions + `setScale` early-return in `src/screen.js`
 
-**Why:** Per spec Section 2, the width-only fallback (Section 2's chicken-and-egg fix) causes the `ResizeObserver` to fire on every canvas resize because the canvas resize changes the parent's intrinsic height. Without an early-return, every callback invocation triggers a full `redrawAll()` and may produce "ResizeObserver loop completed with undelivered notifications" browser warnings. This task adds the guard up front so later tasks don't have to chase a regression.
+**Why:** Two coupled changes per spec Section 2.
+
+1. The width-only fallback (Section 2) causes the `ResizeObserver` to fire on every canvas resize because the canvas resize changes the parent's intrinsic height. Without an early-return in `setScale`, every callback invocation triggers a full `redrawAll()` and may produce "ResizeObserver loop completed with undelivered notifications" browser warnings.
+2. The early-return alone introduces a regression: `scale` initializes to `1`, so the very first `setScale(1)` call returns without ever sizing the canvas. Once Task 5 strips the `width="256" height="192"` HTML attrs from `index.html`, the canvas would stay at the browser default `300×150`. Fix by initializing `canvas.width`/`canvas.height` explicitly inside `createScreen` so `scale=1` actually matches the canvas backing store.
 
 **Files:**
-- Modify: `src/screen.js:22-28`
+- Modify: `src/screen.js:13-19` (initialize canvas dimensions in `createScreen`)
+- Modify: `src/screen.js:22-28` (`setScale` early-return)
 
-- [ ] **Step 1: Read the current `setScale`**
+- [ ] **Step 1: Read the current `createScreen` opening and `setScale`**
 
 ```bash
-sed -n '22,28p' src/screen.js
+sed -n '13,28p' src/screen.js
 ```
 
 Expected output:
 
 ```js
+export function createScreen(canvas) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D context unavailable')
+  ctx.imageSmoothingEnabled = false
+
+  const vram = new Uint8Array(VRAM_SIZE)
+  let scale = 1
+  let inverted = false   // global crash-flash flip; SCREEN 0,1 / SCREEN 0,0 in the original
+
   function setScale(s) {
     scale = Math.max(1, Math.floor(s))
     canvas.width = NATIVE_WIDTH * scale
@@ -71,9 +84,25 @@ Expected output:
   }
 ```
 
-- [ ] **Step 2: Replace with the guarded version**
+- [ ] **Step 2: Initialize canvas dimensions explicitly in `createScreen`**
 
-Use Edit on `src/screen.js`, replacing the block above with:
+Find the line `ctx.imageSmoothingEnabled = false` near the top of `createScreen` (line 16). Insert two new lines immediately after it:
+
+```js
+  ctx.imageSmoothingEnabled = false
+
+  // Make the backing store match scale=1 explicitly, so a setScale(1) call is
+  // correctly a no-op (rather than the canvas staying at the browser default
+  // 300x150 after index.html drops its width/height attrs).
+  canvas.width = NATIVE_WIDTH
+  canvas.height = NATIVE_HEIGHT
+
+  const vram = new Uint8Array(VRAM_SIZE)
+```
+
+- [ ] **Step 3: Add the early-return to `setScale`**
+
+Replace the existing `setScale` body (was lines 22-28) with:
 
 ```js
   function setScale(s) {
@@ -87,19 +116,19 @@ Use Edit on `src/screen.js`, replacing the block above with:
   }
 ```
 
-- [ ] **Step 3: Verify existing tests pass**
+- [ ] **Step 4: Verify existing tests pass**
 
 Open `http://localhost:8000/tests.html` in the browser. Confirm every row says PASS.
 
-- [ ] **Step 4: Verify standalone game runs**
+- [ ] **Step 5: Verify standalone game runs**
 
 Open `http://localhost:8000/`. Click the canvas (browsers may need a click before audio unlock). Confirm pre-title → title music → press-any-key → first descent works without console errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/screen.js
-git commit -m "Early-return in setScale when scale unchanged"
+git commit -m "Init canvas dims in createScreen; early-return setScale on no-change"
 ```
 
 ---
@@ -445,19 +474,16 @@ function pickInitialScale(screen) {
 }
 ```
 
-Replace with:
+Replace with the pure scale formula. The boolean `useWidthOnly` is determined once at boot time (see Step 6) and threaded in:
 
 ```js
-export function computeScale(container, canvas) {
+export function computeScale(container, useWidthOnly) {
   const w = container.clientWidth
-  const h = container.clientHeight
   const widthScale = Math.max(1, Math.floor(w / NATIVE_W))
+  if (useWidthOnly) return widthScale
 
-  // Width-only fallback: parent has no useful height (h===0) or its height
-  // is being contributed by the canvas itself (h===canvas.clientHeight),
-  // which would otherwise lock us at scale=1 forever.
-  if (h === 0 || h === canvas.clientHeight) return widthScale
-
+  const h = container.clientHeight
+  if (h === 0) return widthScale   // safety net for runtime layout collapse
   const heightScale = Math.max(1, Math.floor(h / NATIVE_H))
   return Math.min(widthScale, heightScale)
 }
@@ -623,8 +649,16 @@ export function boot(canvas, options = {}) {
     display:        canvas.style.display,
     touchAction:    canvas.style.touchAction,
   }
+
+  // Width-only-mode detection: hide the canvas, see if the container's height
+  // collapses to 0. If so, the container has no height of its own (no explicit
+  // height, no aspect-ratio) and we must use width-only scaling forever.
+  // Synchronous — the next assignment overwrites display anyway, so no flicker.
+  canvas.style.display = 'none'
+  const useWidthOnly = container.clientHeight === 0
+
   canvas.style.imageRendering = 'pixelated'
-  canvas.style.display = 'block'
+  canvas.style.display = 'block'   // also undoes the 'none' set during detection
   canvas.style.touchAction = 'none'
 
   const priorTabindex = canvas.hasAttribute('tabindex')
@@ -637,10 +671,10 @@ export function boot(canvas, options = {}) {
 
   // Initial scale before the observer fires, so the canvas isn't briefly
   // visible at native 256x192.
-  game.screen.setScale(computeScale(container, canvas))
+  game.screen.setScale(computeScale(container, useWidthOnly))
 
   const ro = new ResizeObserver(() => {
-    game.screen.setScale(computeScale(container, canvas))
+    game.screen.setScale(computeScale(container, useWidthOnly))
   })
   ro.observe(container)
 
@@ -949,6 +983,11 @@ For Scenarios 4, 9, 10, 16, and 17, you'll need additional test fixtures. Add th
     </figure>
   </section>
 
+  <h2>Scenario 18: explicit width 1024px, height 192px (no overflow)</h2>
+  <div id="wrap-18" style="width: 1024px; height: 192px; outline: 2px solid magenta;">
+    <canvas id="canvas-18"></canvas>
+  </div>
+
   <script type="module">
     import { boot } from './src/main.js'
     window.__destroys = {
@@ -959,6 +998,7 @@ For Scenarios 4, 9, 10, 16, and 17, you'll need additional test fixtures. Add th
       s17: boot(document.getElementById('canvas-17'), {
         container: document.getElementById('sized-section'),
       }),
+      s18: boot(document.getElementById('canvas-18')),
     }
   </script>
 </body>
@@ -988,6 +1028,7 @@ Open `http://localhost:8000/embed-test.html` (and `http://localhost:8000/` for t
 | 15 | Double destroy | console: `__destroys.s4()` then `__destroys.s4()` | Second call no-op, no error |
 | 16 | Two-canvas isolation | `embed-test.html` #canvas-16a + #canvas-16b | Run both. Console: `__destroys.s16a()` — surviving canvas keeps playing; destroyed one stops |
 | 17 | options.container override | `embed-test.html` #canvas-17 | Sizing tracks `<section>` not `<figure>`. Resize section in DevTools — canvas re-scales |
+| 18 | Explicit width 1024px, height 192px — no vertical overflow | `embed-test.html` #wrap-18 | Canvas at scale=1 (height-constrained). Canvas does NOT exceed 192px tall and stays within the magenta outline. Validates the boot-time width-only-mode detection rejects this case correctly. |
 
 - [ ] **Step 3: Document any failures**
 

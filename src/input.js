@@ -3,10 +3,11 @@
 // `PLAY "O2 T255 G O3 C"` (~102 ms, fixed) + `FOR PP=1 TO SP NEXT` running at
 // the high-speed CPU rate of ~690 iterations/sec (1.5× the slow-speed reference
 // of 460 iter/sec). My audio.play step beep is fire-and-forget, so the entire
-// iteration time has to live in sleep().
+// iteration time has to live in sleep(). The CoCo math gives roughly:
 //   ↑ key → SP=0:   ~102 ms (just the PLAY portion)
-//   no key → SP≈32: ~148 ms  (PLAY + 46 ms FOR loop)
-//   ↓ key → SP=63:  ~193 ms  (PLAY + 91 ms FOR loop)
+//   no key → SP≈32: ~148 ms (PLAY + 46 ms FOR loop)
+//   ↓ key → SP=63:  ~193 ms (PLAY + 91 ms FOR loop)
+// rounded to 100/150/200 below.
 const SPEED_FAST = 100
 const SPEED_NORMAL = 150
 const SPEED_SLOW = 200

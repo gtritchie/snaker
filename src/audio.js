@@ -204,9 +204,7 @@ export function createAudio() {
   function ensureContext() {
     if (ac || audioDisabled) return ac
     try {
-      const Ctor = globalThis.AudioContext || globalThis.webkitAudioContext
-      if (!Ctor) throw new Error('AudioContext not supported')
-      ac = new Ctor()
+      ac = new AudioContext()
     } catch (err) {
       audioDisabled = true
       console.warn('audio: AudioContext unavailable, audio disabled:', err)

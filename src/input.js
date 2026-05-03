@@ -1,7 +1,10 @@
-// Three discrete delay values (ms) for keyboard speed. Calibrated in Task 16.
-const SPEED_FAST = 30
-const SPEED_NORMAL = 80
-const SPEED_SLOW = 200
+// Three discrete delay values (ms) for keyboard speed. Calibrated against an
+// emulator: a no-collision descent on real CoCo takes ~29s, so per-segment
+// pacing at default speed is ~150ms across the 196 inner-loop iterations
+// (14 rows × 7 codes × 2 passes).
+const SPEED_FAST = 60
+const SPEED_NORMAL = 160
+const SPEED_SLOW = 400
 
 function computeX(left, right) {
   return (right ? 1 : 0) - (left ? 1 : 0)

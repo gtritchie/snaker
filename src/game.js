@@ -363,11 +363,11 @@ async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
     audio.flush()
     audio.play("O2 T2 L8 B")
     screen.setInverted(true)
-    await sleep(60)
+    await sleep(120)
     audio.flush()
     audio.play("L8 E")
     screen.setInverted(false)
-    await sleep(60)
+    await sleep(120)
   }
 
   // BASIC RND(29)+1505 → 1506..1534.
@@ -396,7 +396,7 @@ async function celebrateRun(screen, audio) {
     screen.poke(1504, 175)
     screen.poke(1535, 175)
     screen.scrollUp()
-    await sleep(20)
+    await sleep(40)
   }
   screen.poke(1504, 175)
   screen.poke(1535, 175)

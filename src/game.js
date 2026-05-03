@@ -440,11 +440,11 @@ async function titleScreen(screen, audio, input) {
   //   PRINT@224,STRING$(13,255)
   //   PRINT@237,"snaker";STRING$(13,255);STRING$(32,"%")
   screen.cls(rnd(4) + 1)
-  for (let i = 0; i < 32; i++) screen.poke(1024 + 192 + i, 37)         // '%' top row
-  for (let i = 0; i < 13; i++) screen.poke(1024 + 224 + i, 255)        // orange blocks left of "snaker"
-  screen.printAt(237, 'snaker')                                         // PRINT@237 → cols 13-18 of row 7
-  for (let i = 0; i < 13; i++) screen.poke(1024 + 243 + i, 255)        // orange blocks right of "snaker"
-  for (let i = 0; i < 32; i++) screen.poke(1024 + 256 + i, 37)         // '%' row below
+  for (let i = 0; i < 32; i++) screen.poke(1024 + 192 + i, 37)   // '%' top row
+  for (let i = 0; i < 13; i++) screen.poke(1024 + 224 + i, 255)  // orange blocks left of "snaker"
+  screen.printAt(237, 'snaker')                                  // cols 13-18 of row 7
+  for (let i = 0; i < 13; i++) screen.poke(1024 + 243 + i, 255)  // orange blocks right of "snaker"
+  for (let i = 0; i < 32; i++) screen.poke(1024 + 256 + i, 37)   // '%' row below
 
   // Play the Bublitchki melody in full, like the original BASIC's blocking PLAY
   // on line 50. Then show the start prompt and wait for the player.

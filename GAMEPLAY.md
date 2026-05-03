@@ -7,10 +7,13 @@ better). Hitting a car bumps you back up one row and resumes the run.
 
 ## Starting a game
 
-1. Open `index.html` (or visit the hosted page). The pre-title screen reads
-   `PRESS ANY KEY TO RUN THE PROGRAM`.
-2. Press any key (or tap the canvas on a touch device). The Bublitchki title
-   melody plays in full, then `<<press ANY key TO START>>` appears.
+1. Serve the checkout over HTTP. The app loads ES modules, which most browsers
+   refuse to import from a `file://` URL. From the repo root run
+   `python3 -m http.server 8000` (or any equivalent static server) and open
+   `http://localhost:8000/`. Visiting a hosted deploy works the same way.
+2. The pre-title screen reads `PRESS ANY KEY TO RUN THE PROGRAM`. Press any
+   key (or tap the canvas on a touch device). The Bublitchki title melody
+   plays in full, then `<<press ANY key TO START>>` appears.
 3. Press any key again. The walls draw in with stepped tones, and the snake
    starts at the top of the highway.
 
@@ -44,8 +47,9 @@ The canvas itself is a virtual joystick:
    register as input.
 4. Lift your finger to release all directions. Touch again to re-center.
 
-A single tap also advances the pre-title and title prompts, so touch-only play
-needs no keyboard.
+A single tap also advances the pre-title and title prompts. Steering and
+speed during gameplay work entirely from touch — but the name-entry and
+`ANOTHER GAME (Y/N)` prompts still require a keyboard.
 
 ## Prompts during a game
 

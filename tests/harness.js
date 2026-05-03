@@ -1,12 +1,18 @@
 const results = []
+const pending = []
 
+// Tests register synchronously at module-eval time but may run async work.
+// `report()` awaits every registered test before rendering so an async assertion
+// failure can never silently land as PASS via an unobserved rejected promise.
 export function test(name, fn) {
-  try {
-    fn()
-    results.push({ name, ok: true })
-  } catch (err) {
-    results.push({ name, ok: false, err })
-  }
+  pending.push((async () => {
+    try {
+      await fn()
+      results.push({ name, ok: true })
+    } catch (err) {
+      results.push({ name, ok: false, err })
+    }
+  })())
 }
 
 export function assertEquals(actual, expected, msg = '') {
@@ -32,7 +38,8 @@ export function assertThrows(fn, msg = 'expected throw') {
   throw new Error(msg)
 }
 
-export function report() {
+export async function report() {
+  await Promise.all(pending)
   const root = document.body
   const summary = document.createElement('h1')
   const passed = results.filter(r => r.ok).length

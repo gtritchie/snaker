@@ -1,39 +1,29 @@
 // Parse a CoCo PLAY string into an array of events. Pure function — no Web Audio.
 //
 // Supported tokens (case-insensitive, whitespace ignored):
-//   Tnnn         tempo (1-255)
-//   Onnn         octave (1-5)
-//   Vnnn         volume (1-31), absolute
-//   V>           increment volume (relative; resolved by synth running state)
-//   V<           decrement volume (relative)
-//   Lnnn[.+]     default note length (1, 2, 4, 8, 16, 32) with optional trailing dots
-//   A-G          note in current octave; optional # or + (sharp), - (flat);
-//                optional inline length digits; trailing dots extend duration
-//   Pnnn[.+]     rest with optional length and dots
-//   Nnnn         note by chromatic number 1-12 within current octave
+//   Tnnn / T+ / T- / T> / T<   tempo: set, +1, -1, ×2, /2
+//   Onnn / O+ / O- / O> / O<   octave: set, +1, -1, ×2, /2
+//   Vnnn / V+ / V- / V> / V<   volume: set, +1, -1, ×2, /2
+//   Lnnn[.+] / L+ / L- / L> / L<   default note length (with optional trailing dots)
+//   A-G   note in current octave; optional # or + (sharp), - (flat);
+//         optional inline length digits; trailing dots extend duration
+//   Pnnn[.+]   rest with optional length and dots
+//   Nnnn       note by chromatic number 1-12 within current octave
 //
 // CoCo runtime quirks:
 //   - BASIC's STR$(N) prepends a space for non-negative integers, so PLAY strings
 //     built like "T255 O"+STR$(O)+"N"+STR$(N) resolve to "T255 O 1N 5". Whitespace
 //     between a token letter and its numeric argument is therefore skipped.
-//   - L4... carries the dot count into a length event; the synth applies it as the
-//     default dot multiplier for following notes that lack their own length/dots.
 //
 // Cross-call running state (tempo, octave, default length+dots, volume) is the
-// SYNTH's responsibility, not the parser's. The parser emits null on note fields
-// that were not explicitly set within this string; the synth resolves them
-// against state carried over from previous play() calls.
+// SYNTH's responsibility, not the parser's. The parser emits state events for
+// each T/O/V/L token (with either a `value` or an `op`) and lets the synth apply
+// them in order against its persistent state. Notes/rests carry their own length
+// and dots if specified in the string, otherwise null.
 export function parsePlayString(input) {
   const events = []
   const s = input
   let i = 0
-
-  // Parser-internal "running within this string" state for octave/length/dots.
-  // null means "not yet set in this string" — the synth will fall back to its
-  // own cross-call running state at note resolution time.
-  let inStringOctave = null
-  let inStringLength = null
-  let inStringLengthDots = null
 
   function eof() { return i >= s.length }
   function skipWhitespace() { while (!eof() && /\s/.test(s[i])) i++ }
@@ -51,6 +41,23 @@ export function parsePlayString(input) {
     return dots
   }
 
+  // Read either a numeric argument or one of the four CoCo PLAY suffix operators
+  // following a T/O/V/L token. Returns:
+  //   { value: N }            absolute set
+  //   { op: '+'|'-'|'>'|'<' } relative op (synth applies against its running state)
+  //   null                    nothing readable
+  function readSuffix() {
+    skipWhitespace()
+    if (eof()) return null
+    const ch = s[i]
+    if (ch === '+' || ch === '-' || ch === '>' || ch === '<') {
+      i++
+      return { op: ch }
+    }
+    const v = readNumber()
+    return v === null ? null : { value: v }
+  }
+
   while (!eof()) {
     skipWhitespace()
     if (eof()) break
@@ -59,61 +66,51 @@ export function parsePlayString(input) {
     i++
 
     if (c === 'T') {
-      const v = readNumber()
-      if (v !== null) events.push({ type: 'tempo', value: v })
+      const r = readSuffix()
+      if (r) events.push({ type: 'tempo', ...r })
     } else if (c === 'O') {
-      const v = readNumber()
-      if (v !== null) {
-        inStringOctave = v
-        events.push({ type: 'octave', value: v })
-      }
+      const r = readSuffix()
+      if (r) events.push({ type: 'octave', ...r })
     } else if (c === 'L') {
-      const v = readNumber()
-      if (v !== null) {
+      const r = readSuffix()
+      if (r) {
         const dots = readDots()
-        inStringLength = v
-        inStringLengthDots = dots
-        events.push({ type: 'length', value: v, dots })
+        events.push({ type: 'length', ...r, dots })
       }
     } else if (c === 'V') {
-      skipWhitespace()
-      if (s[i] === '>') { i++; events.push({ type: 'volume', relative: 1 }) }
-      else if (s[i] === '<') { i++; events.push({ type: 'volume', relative: -1 }) }
-      else {
-        const v = readNumber()
-        if (v !== null) events.push({ type: 'volume', value: v })
-      }
+      const r = readSuffix()
+      if (r) events.push({ type: 'volume', ...r })
     } else if (c === 'P') {
       const ownLen = readNumber()
       const ownDots = readDots()
-      events.push({
-        type: 'rest',
-        length: ownLen,                  // null if not specified
-        dots: ownDots,                   // 0 if not specified
-        defaultLength: inStringLength,   // snapshot of in-string default at this point
-        defaultDots: inStringLengthDots,
-      })
+      events.push({ type: 'rest', length: ownLen, dots: ownDots })
     } else if (c === 'N') {
       const num = readNumber()
-      events.push({ type: 'noteNumber', number: num, octave: inStringOctave })
+      events.push({ type: 'noteNumber', number: num })
     } else if (c >= 'A' && c <= 'G') {
       let accidental = 0
       if (s[i] === '#' || s[i] === '+') { accidental = 1; i++ }
       else if (s[i] === '-') { accidental = -1; i++ }
       const ownLen = readNumber()
       const ownDots = readDots()
-      events.push({
-        type: 'note', name: c, accidental,
-        length: ownLen,
-        dots: ownDots,
-        octave: inStringOctave,
-        defaultLength: inStringLength,
-        defaultDots: inStringLengthDots,
-      })
+      events.push({ type: 'note', name: c, accidental, length: ownLen, dots: ownDots })
     }
   }
 
   return events
+}
+
+// Resolve a state event against the current running value. Used by the synth for
+// tempo/octave/volume/length events that may carry either a `value` or an `op`.
+export function applyStateOp(current, event) {
+  if (event.value !== undefined) return event.value
+  switch (event.op) {
+    case '+': return current + 1
+    case '-': return current - 1
+    case '>': return current * 2
+    case '<': return Math.floor(current / 2)
+    default: return current
+  }
 }
 
 // Compute the dotted-duration multiplier from a dot count. 0 dots → 1.0, 1 → 1.5,
@@ -162,12 +159,15 @@ function volumeToGain(v) {
   return Math.max(0, Math.min(31, v)) / 31 * 0.25
 }
 
-// Resolve a note/rest event's effective length and dots against the synth's running
-// defaults. Per-event own length OR own dots disables default-dot inheritance.
+// Resolve a note/rest event's effective length and dots against the synth's
+// running defaults. Per-event own length OR own dots disables default-dot
+// inheritance — e.g. after `L4...` a bare note picks up length=4 with 3 dots,
+// but `L4... B5` (own length) becomes length=5 with 0 dots and `L4... B.`
+// (own single dot) becomes length=4 with 1 dot.
 function resolveLengthAndDots(event, runningLength, runningDots) {
-  const useLength = event.length ?? event.defaultLength ?? runningLength
+  const useLength = event.length ?? runningLength
   const ownSpecified = event.length !== null || event.dots > 0
-  const useDots = ownSpecified ? event.dots : (event.defaultDots ?? runningDots)
+  const useDots = ownSpecified ? event.dots : runningDots
   return { useLength, useDots }
 }
 
@@ -257,18 +257,14 @@ export function createAudio() {
     const start = queueTime
 
     for (const e of events) {
-      if (e.type === 'tempo') { runningTempo = e.value; continue }
-      if (e.type === 'octave') { runningOctave = e.value; continue }
+      if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }
+      if (e.type === 'octave') { runningOctave = applyStateOp(runningOctave, e); continue }
       if (e.type === 'length') {
-        runningLength = e.value
-        runningLengthDots = e.dots
+        runningLength = applyStateOp(runningLength, e)
+        runningLengthDots = e.dots ?? 0
         continue
       }
-      if (e.type === 'volume') {
-        if (typeof e.relative === 'number') runningVolume += e.relative
-        else runningVolume = e.value
-        continue
-      }
+      if (e.type === 'volume') { runningVolume = applyStateOp(runningVolume, e); continue }
 
       if (suspended) continue   // skip scheduling for note/rest events while hidden
 
@@ -277,14 +273,12 @@ export function createAudio() {
         queueTime += eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
       } else if (e.type === 'note') {
         const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
-        const useOctave = e.octave ?? runningOctave
         const dur = eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
-        scheduleTone(noteFrequency(e.name, e.accidental, useOctave), dur, volumeToGain(runningVolume))
+        scheduleTone(noteFrequency(e.name, e.accidental, runningOctave), dur, volumeToGain(runningVolume))
         queueTime += dur
       } else if (e.type === 'noteNumber') {
-        const useOctave = e.octave ?? runningOctave
         const dur = eventDurationSec(runningLength, dotMultiplier(runningLengthDots), runningTempo)
-        scheduleTone(noteNumberFrequency(e.number, useOctave), dur, volumeToGain(runningVolume))
+        scheduleTone(noteNumberFrequency(e.number, runningOctave), dur, volumeToGain(runningVolume))
         queueTime += dur
       }
     }

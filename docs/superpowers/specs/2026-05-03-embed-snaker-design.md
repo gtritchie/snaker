@@ -89,7 +89,78 @@ destroy()
 
 ---
 
-## Section 2 — *(pending)*
+## Section 2 — Sizing
+
+Replace `pickInitialScale`'s viewport-based math with container-based math, and replace the `window.resize` listener with a `ResizeObserver` on the container.
+
+**Container resolution**
+
+```js
+const container = options.container ?? canvas.parentElement
+if (!(container instanceof Element)) {
+  throw new Error('snaker: boot(canvas) requires canvas to be in the DOM, or pass options.container')
+}
+```
+
+**Scale computation**
+
+```js
+function computeScale(container, canvas) {
+  const w = container.clientWidth
+  const h = container.clientHeight
+  const widthScale = Math.max(1, Math.floor(w / NATIVE_W))
+
+  // Width-only fallback: parent has no useful height (h===0) or its height
+  // is being contributed by the canvas itself (h===canvas.clientHeight),
+  // which would otherwise lock us at scale=1 forever.
+  if (h === 0 || h === canvas.clientHeight) return widthScale
+
+  const heightScale = Math.max(1, Math.floor(h / NATIVE_H))
+  return Math.min(widthScale, heightScale)
+}
+```
+
+The `h === canvas.clientHeight` check is what breaks the chicken-and-egg with parents that have no explicit height: without it, the parent's intrinsic height tracks the canvas's height, so `min(widthScale, heightScale)` never exceeds 1.
+
+**ResizeObserver lifecycle**
+
+`boot()` creates one `ResizeObserver` watching the container. The callback recomputes scale and calls `screen.setScale(newScale)`. `destroy()` disconnects it.
+
+```js
+const ro = new ResizeObserver(() => {
+  screen.setScale(computeScale(container, canvas))
+})
+ro.observe(container)
+```
+
+The window `resize` listener in `runGame()` (`src/game.js:114`) is removed entirely — `ResizeObserver` fires on viewport resize too when the container's size depends on viewport units.
+
+**Initial scale**
+
+Call `screen.setScale(computeScale(...))` once synchronously inside `boot()` before observing, so the canvas isn't briefly displayed at 256×192 native before the first observer callback fires.
+
+**Required change in `screen.js`**
+
+`setScale(s)` (`src/screen.js:22-28`) currently always reassigns `canvas.width/height` and calls `redrawAll()`, even when `s` matches the current scale. In width-only fallback mode the observer fires on every canvas resize (because the canvas resize changes the parent's intrinsic height, which re-fires the observer). Add an early return when the new scale equals the current scale — this is what keeps the fallback from triggering unnecessary redraws and ResizeObserver-loop browser warnings.
+
+```js
+function setScale(s) {
+  const next = Math.max(1, Math.floor(s))
+  if (next === scale) return
+  scale = next
+  canvas.width = NATIVE_WIDTH * scale
+  canvas.height = NATIVE_HEIGHT * scale
+  ctx.imageSmoothingEnabled = false
+  redrawAll()
+}
+```
+
+**What stays unchanged**
+
+- Integer scale only (no fractional zoom).
+- Minimum scale 1 (canvas always renders at native or larger).
+- `screen.setScale` remains the only sizing entry point.
+- `NATIVE_W = 256`, `NATIVE_H = 192` constants in `game.js`.
 
 ## Section 3 — *(pending)*
 

@@ -431,6 +431,10 @@ async function titleScreen(screen, audio, input) {
   // black text on a uniform green background.
   for (let i = 0; i < 512; i++) screen.poke(1024 + i, 32) // code 32 = solid green block
   screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM')
+  screen.printAt(294, 'MOVE: ARROWS / WASD')
+  screen.printAt(321, 'SPEED: UP/W=FAST  DOWN/S=SLOW')
+  screen.printAt(360, 'ABORT GAME: ESC')
+  screen.printAt(417, 'TOUCH SCREEN: VIRTUAL JOYSTICK')
   await tracked(input.waitForKey())
   await audio.resume().catch(err => {
     console.warn('audio: resume blocked, continuing muted:', err)

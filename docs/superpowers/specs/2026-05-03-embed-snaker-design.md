@@ -162,7 +162,67 @@ function setScale(s) {
 - `screen.setScale` remains the only sizing entry point.
 - `NATIVE_W = 256`, `NATIVE_H = 192` constants in `game.js`.
 
-## Section 3 — *(pending)*
+## Section 3 — Keyboard, focus, and touch scope
+
+The current engine attaches `keydown`/`keyup` to `window` (`src/input.js:163-164`) and `preventDefault`s arrow keys, WASD, and Esc on every event. Embedded, this swallows page-level keystrokes (browser shortcuts, theme toggles, Esc-to-close-modal) even when the player isn't focused on the game.
+
+**Make the canvas focusable**
+
+In `boot()`, set `canvas.tabIndex = 0` if it isn't already set by the host. This makes the canvas a focusable element and a keyboard-focus stop, without overriding a host that wants a different tab order.
+
+```js
+if (!canvas.hasAttribute('tabindex')) canvas.tabIndex = 0
+```
+
+**Move keyboard listeners from `window` to `canvas`**
+
+In `createInput(canvas)` (`src/input.js`):
+
+```js
+canvas.addEventListener('keydown', onKeyDown)
+canvas.addEventListener('keyup', onKeyUp)
+```
+
+(The matching `removeEventListener` calls in `destroy()` change too.)
+
+Because keyboard events only reach the canvas when it has focus, `preventDefault()` calls inside `onKeyDown` (and the Esc handler) only fire during gameplay focus. Page-level shortcuts and browser scroll keep working when the player isn't playing.
+
+**Click-to-focus**
+
+Canvases don't take focus on mouse click by default, even with `tabindex`. Without click-to-focus, a desktop player would have to Tab into the canvas before keys register — non-obvious. Add a single listener in `boot()`:
+
+```js
+canvas.addEventListener('mousedown', () => canvas.focus({ preventScroll: true }))
+```
+
+`preventScroll: true` keeps the page from scrolling the canvas into view if it happens to be off-screen.
+
+(Touchstart already resolves any pending `waitForKey` and triggers a focus side-effect via the canvas being the touch target on iOS Safari; no change needed for touch.)
+
+**Touch-action scope**
+
+Move `touch-action: none` from `body` (in `index.html`) to the canvas itself, applied as an inline style by `boot()` (see Section 4 for the full inline-style set). Hosts can still scroll/pan-zoom the page outside the canvas.
+
+**What about the "PRESS ANY KEY TO RUN THE PROGRAM" prompt?**
+
+Slight UX shift: a desktop player landing on a host page must click the canvas once before the prompt accepts keys. Acceptable trade-off — the alternative (auto-focusing on mount) would steal focus from the host page, which is worse for an embed. The pre-title text could optionally be amended to "CLICK THEN PRESS ANY KEY" but is not in scope for this refactor.
+
+**Tab key**
+
+Not intercepted. Letting Tab move focus away from the canvas is the right accessible behavior for an embed.
+
+**`destroy()` removes**
+
+- `keydown`/`keyup` from canvas
+- `mousedown` (focus helper) from canvas
+- `touchstart`/`touchmove`/`touchend`/`touchcancel` from canvas (already in `createInput.destroy`)
+
+**What stays unchanged**
+
+- Touch joystick logic and listener targets (`canvas`).
+- Key bindings (arrows, WASD, Esc).
+- `lineInput` and `waitForKey` semantics.
+- The Esc-fires-fireAbort chain.
 
 ## Section 4 — *(pending)*
 

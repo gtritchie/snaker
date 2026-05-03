@@ -160,8 +160,8 @@ export function createInput(canvas) {
     canvas.addEventListener('touchcancel', onTouchEnd,  { passive: false })
   }
 
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup', onKeyUp)
+  canvas.addEventListener('keydown', onKeyDown)
+  canvas.addEventListener('keyup', onKeyUp)
 
   function getX() {
     return computeX(kbKeys.left || tcKeys.left, kbKeys.right || tcKeys.right)
@@ -198,8 +198,8 @@ export function createInput(canvas) {
   }
 
   function destroy() {
-    window.removeEventListener('keydown', onKeyDown)
-    window.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('keydown', onKeyDown)
+    canvas.removeEventListener('keyup', onKeyUp)
     if (isTouchDevice) {
       canvas.removeEventListener('touchstart', onTouchStart)
       canvas.removeEventListener('touchmove', onTouchMove)

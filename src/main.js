@@ -3,6 +3,15 @@ import { runGame } from './game.js'
 export function boot(canvas) {
   let audioRef = null
 
+  // Make the canvas focusable so keyboard events reach it. Don't override a
+  // host that has already set its own tabindex.
+  if (!canvas.hasAttribute('tabindex')) canvas.tabIndex = 0
+
+  // Canvases don't take focus on click by default. Without this, a desktop
+  // player would have to Tab into the canvas before keys register.
+  const onMouseDown = () => canvas.focus({ preventScroll: true })
+  canvas.addEventListener('mousedown', onMouseDown)
+
   // Pause audio when the tab is hidden; resume when visible again. Without this,
   // a backgrounded game would keep stepping (via setTimeout) and audio would
   // continue playing — both undesirable.

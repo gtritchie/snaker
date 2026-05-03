@@ -163,6 +163,15 @@ export function createInput(canvas) {
   canvas.addEventListener('keydown', onKeyDown)
   canvas.addEventListener('keyup', onKeyUp)
 
+  // When the canvas loses focus while a direction key is held, the matching
+  // keyup goes to the new focus target instead of the canvas — leaving
+  // kbKeys with a stuck `true`. Clear keyboard direction state on blur so
+  // the next focus starts from a clean slate.
+  const onBlur = () => {
+    kbKeys.left = kbKeys.right = kbKeys.up = kbKeys.down = false
+  }
+  canvas.addEventListener('blur', onBlur)
+
   function getX() {
     return computeX(kbKeys.left || tcKeys.left, kbKeys.right || tcKeys.right)
   }
@@ -200,6 +209,7 @@ export function createInput(canvas) {
   function destroy() {
     canvas.removeEventListener('keydown', onKeyDown)
     canvas.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('blur', onBlur)
     if (isTouchDevice) {
       canvas.removeEventListener('touchstart', onTouchStart)
       canvas.removeEventListener('touchmove', onTouchMove)

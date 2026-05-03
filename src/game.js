@@ -3,6 +3,16 @@ import { createAudio } from './audio.js'
 import { createInput } from './input.js'
 import { loadBestScore, saveBestScore } from './storage.js'
 
+// ─── Tuning knobs ────────────────────────────────────────────────────────────
+// Number of full top-to-bottom descents required to win one game.
+// Original BASIC value is 3; lower it (e.g. 1) when testing the win/score flow.
+const REQUIRED_DESCENTS = 3
+// Whether collision detection is active. Set to false to make the snake invincible
+// during testing — useful for sanity-checking the win sequence and score screens
+// without having to dodge the cars.
+const COLLISION_DETECTION = true
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Convert elapsed timer ticks (60 Hz) to "MM:SS".
 // Mirrors the original BASIC formatting from snaker.bas lines 520-540, including
 // its quirks: CoCo BASIC's STR$ prepends a leading space for non-negative integers,
@@ -272,7 +282,7 @@ async function playRounds(screen, audio, input) {
     leftEdge = 1025; rightEdge = 1054; playerPos = 1039
 
     runs += 1
-    if (runs >= 3) return msToTicks(accumulatedMs)
+    if (runs >= REQUIRED_DESCENTS) return msToTicks(accumulatedMs)
     await celebrateRun(screen, audio)   // not counted toward score
   }
 }
@@ -301,7 +311,7 @@ async function singleDescent(screen, audio, input, init) {
         if (playerPos < leftEdge) playerPos = leftEdge
         else if (playerPos > rightEdge) playerPos = rightEdge
 
-        if (screen.peek(playerPos) !== 96) {
+        if (COLLISION_DETECTION && screen.peek(playerPos) !== 96) {
           ;({ leftEdge, rightEdge, playerPos } = await crashHandler(screen, audio,
             { leftEdge, rightEdge, playerPos }))
           crashed = true

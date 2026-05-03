@@ -41,7 +41,7 @@ This is a pure refactor — gameplay, controls, scoring, save format, and intern
 | --- | --- |
 | Cleanup API shape | `boot()` returns a `destroy()` function |
 | Container source | `canvas.parentElement` by default; `options.container` overrides |
-| Parent-height fallback | Width-only scaling when parent height is 0 or matches the canvas's own height |
+| Parent-height fallback | Boot-time detection: hide the canvas, check if container collapses to 0; cache the answer for the lifetime of the boot |
 | Refactor scope | Surgical patch + brief README "Embedding" section. No new modules. |
 
 ---
@@ -102,25 +102,38 @@ if (!(container instanceof Element)) {
 }
 ```
 
-**Scale computation**
+**Width-only-mode detection (one-shot, at boot)**
+
+A naive `min(widthScale, heightScale)` formula breaks when the container has no explicit height: the canvas's intrinsic height feeds back into the parent's `clientHeight`, locking us at scale=1 forever. We need to know up front whether the container has its own height or is depending on the canvas.
+
+Detect this once at `boot()` time by hiding the canvas and reading the container's height in isolation. All synchronous, no browser repaint between the steps:
 
 ```js
-function computeScale(container, canvas) {
+// In boot(), before applying any engine-essential inline styles:
+canvas.style.display = 'none'
+const useWidthOnly = container.clientHeight === 0
+// (we're about to overwrite canvas.style.display = 'block' a few lines later, so
+// no need to restore it here — see Section 4 for the full inline-style ordering)
+```
+
+Cache `useWidthOnly` in `boot()`'s closure for the lifetime of the boot. If the host re-architects the layout (adds an `aspect-ratio`, removes a sibling, etc.) they should `destroy()` and re-`boot()` to re-detect.
+
+**Scale computation (pure)**
+
+```js
+export function computeScale(container, useWidthOnly) {
   const w = container.clientWidth
-  const h = container.clientHeight
   const widthScale = Math.max(1, Math.floor(w / NATIVE_W))
+  if (useWidthOnly) return widthScale
 
-  // Width-only fallback: parent has no useful height (h===0) or its height
-  // is being contributed by the canvas itself (h===canvas.clientHeight),
-  // which would otherwise lock us at scale=1 forever.
-  if (h === 0 || h === canvas.clientHeight) return widthScale
-
+  const h = container.clientHeight
+  if (h === 0) return widthScale   // safety net for runtime layout collapse
   const heightScale = Math.max(1, Math.floor(h / NATIVE_H))
   return Math.min(widthScale, heightScale)
 }
 ```
 
-The `h === canvas.clientHeight` check is what breaks the chicken-and-egg with parents that have no explicit height: without it, the parent's intrinsic height tracks the canvas's height, so `min(widthScale, heightScale)` never exceeds 1.
+Edge case validated: a container with explicit `height: 192px` no longer mis-fires the width-only fallback. The detection sees `clientHeight === 192` (not 0) and locks `useWidthOnly = false`; subsequent `computeScale` calls use both dimensions and respect the explicit height.
 
 **ResizeObserver lifecycle**
 
@@ -128,7 +141,7 @@ The `h === canvas.clientHeight` check is what breaks the chicken-and-egg with pa
 
 ```js
 const ro = new ResizeObserver(() => {
-  screen.setScale(computeScale(container, canvas))
+  screen.setScale(computeScale(container, useWidthOnly))
 })
 ro.observe(container)
 ```
@@ -137,21 +150,38 @@ The window `resize` listener in `runGame()` (`src/game.js:114`) is removed entir
 
 **Initial scale**
 
-Call `screen.setScale(computeScale(...))` once synchronously inside `boot()` before observing, so the canvas isn't briefly displayed at 256×192 native before the first observer callback fires.
+Call `screen.setScale(computeScale(container, useWidthOnly))` once synchronously inside `boot()` before observing, so the canvas isn't briefly displayed at 256×192 native before the first observer callback fires.
 
-**Required change in `screen.js`**
+**Required changes in `screen.js`**
 
-`setScale(s)` (`src/screen.js:22-28`) currently always reassigns `canvas.width/height` and calls `redrawAll()`, even when `s` matches the current scale. In width-only fallback mode the observer fires on every canvas resize (because the canvas resize changes the parent's intrinsic height, which re-fires the observer). Add an early return when the new scale equals the current scale — this is what keeps the fallback from triggering unnecessary redraws and ResizeObserver-loop browser warnings.
+Two coupled changes:
+
+1. **Initialize the canvas at native dimensions in `createScreen`** so `scale=1` actually matches the canvas backing store. Otherwise, with `index.html` no longer providing `width="256" height="192"` HTML attrs (Section 4), the canvas would start at the browser's default `300×150` and a `setScale(1)` call would silently no-op via the early-return introduced below.
+2. **Add an early return to `setScale`** when the new scale matches the current scale. In width-only fallback mode the observer fires on every canvas resize (because the canvas resize changes the parent's intrinsic height, which re-fires the observer). Without the early return, every callback triggers a full `redrawAll()` and may produce "ResizeObserver loop" browser warnings.
 
 ```js
-function setScale(s) {
-  const next = Math.max(1, Math.floor(s))
-  if (next === scale) return
-  scale = next
-  canvas.width = NATIVE_WIDTH * scale
-  canvas.height = NATIVE_HEIGHT * scale
+export function createScreen(canvas) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 2D context unavailable')
   ctx.imageSmoothingEnabled = false
-  redrawAll()
+
+  // Make the backing store match scale=1 explicitly, so a setScale(1) call is
+  // correctly a no-op (rather than the canvas staying at the browser default).
+  canvas.width = NATIVE_WIDTH
+  canvas.height = NATIVE_HEIGHT
+
+  const vram = new Uint8Array(VRAM_SIZE)
+  let scale = 1
+  // ...
+  function setScale(s) {
+    const next = Math.max(1, Math.floor(s))
+    if (next === scale) return
+    scale = next
+    canvas.width = NATIVE_WIDTH * scale
+    canvas.height = NATIVE_HEIGHT * scale
+    ctx.imageSmoothingEnabled = false
+    redrawAll()
+  }
 }
 ```
 
@@ -230,7 +260,7 @@ The current `index.html` puts engine-essential CSS (`touch-action: none`, `image
 
 **Engine-applied inline styles**
 
-`boot()` snapshots the canvas's existing inline values for the three properties it manages, then sets its own values, before the first `setScale()` call:
+`boot()` snapshots the canvas's existing inline values for the three properties it manages, performs the one-shot width-only-mode detection from Section 2, then sets the engine values — all before the first `setScale()` call:
 
 ```js
 const priorStyles = {
@@ -238,8 +268,15 @@ const priorStyles = {
   display:        canvas.style.display,
   touchAction:    canvas.style.touchAction,
 }
+
+// Width-only-mode detection (see Section 2): hide the canvas, read the
+// container's height in isolation. Synchronous, no flicker — the next
+// statement overwrites display anyway.
+canvas.style.display = 'none'
+const useWidthOnly = container.clientHeight === 0
+
 canvas.style.imageRendering = 'pixelated'
-canvas.style.display = 'block'
+canvas.style.display = 'block'   // also undoes the 'none' set during detection
 canvas.style.touchAction = 'none'
 ```
 
@@ -458,7 +495,8 @@ Add a new top-level section to `README.md` titled **"Embedding"**, structured as
 
 **Container sizing rules.**
 - The engine renders at integer scale only.
-- Width is required; height optional. With both, scale = `min(max(1, floor(W/256)), max(1, floor(H/192)))`. With width only (or a parent whose height is contributed by the canvas itself), scale = `max(1, floor(W/256))`. The `max(1, …)` clamp guarantees the canvas always renders at least at native resolution, even in containers narrower than 256 px or shorter than 192 px.
+- Width is required; height optional. With both, scale = `min(max(1, floor(W/256)), max(1, floor(H/192)))`. With width only (no explicit height and no `aspect-ratio`), scale = `max(1, floor(W/256))` and the canvas's content drives the container height. The `max(1, …)` clamp guarantees the canvas always renders at least at native resolution, even in containers narrower than 256 px or shorter than 192 px.
+- The width-only mode is detected once at `boot()` time by hiding the canvas and reading the container's height in isolation. If the host changes the container's height behavior at runtime (adds/removes `aspect-ratio`, changes flex layout, etc.), call `destroy()` and `boot()` again to re-detect.
 - Resize the container freely — a `ResizeObserver` re-scales the canvas. Browser viewport resize propagates if the container's size depends on viewport units.
 
 **SPA cleanup pattern.** Document the Astro `ClientRouter` case:
@@ -507,8 +545,9 @@ Per the chosen scope (**surgical patch + brief README section, no tests**), this
 | 15 | Call `destroy()` twice | Second call is a no-op; no errors |
 | 16 | Boot two canvases on the same page; destroy one | Surviving canvas keeps playing; destroyed one stops cleanly |
 | 17 | Boot with `options.container` pointing at an ancestor that is *not* `canvas.parentElement` (e.g. canvas wrapped in a presentational `<figure>` inside a sized `<section>`; pass the `<section>`) | Sizing tracks the explicit container, not the parent; `ResizeObserver` fires on the section's resize, not the figure's |
+| 18 | Embed in a container with explicit `width: 1024px; height: 192px` | Canvas at scale=1 (height-constrained); does NOT overflow vertically. Validates that explicit container heights matching the native canvas height do not trigger the width-only fallback. |
 
-Scenario 16 specifically validates the per-instance abort scoping from Section 5. Scenario 17 validates that `options.container` actually overrides the `parentElement` default.
+Scenario 16 specifically validates the per-instance abort scoping from Section 5. Scenario 17 validates that `options.container` actually overrides the `parentElement` default. Scenario 18 specifically validates the boot-time width-only-mode detection.
 
 ---
 

@@ -191,7 +191,8 @@ async function showScore(screen, audio, elapsed) {
       await tracked(audio.play(`T255 O${o} N${n}`))
     }
   }
-  await sleep(1500)  // BASIC FOR PP=1 TO 1800 — calibrate to taste in Task 16
+  await sleep(4000)  // BASIC FOR PP=1 TO 1800 at slow speed (high-speed POKE was
+                     // turned off on line 430 before the win sequence) ≈ 4 seconds.
   return timeStr
 }
 
@@ -241,7 +242,7 @@ async function showBestScore(screen, audio) {
       await tracked(audio.play(`T255 O${o} N${n}`))
     }
   }
-  await sleep(2000)
+  await sleep(4000)  // matching BASIC line 660's FOR PP=1 TO 1800 pause at slow speed
 }
 
 async function playAgainPrompt(screen, audio, input) {

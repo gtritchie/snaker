@@ -49,19 +49,22 @@ const rnd = n => Math.floor(Math.random() * n) + 1
 const NATIVE_W = 256
 const NATIVE_H = 192
 
-function pickInitialScale(screen) {
-  const maxW = Math.floor(window.innerWidth / NATIVE_W)
-  const maxH = Math.floor(window.innerHeight / NATIVE_H)
-  const scale = Math.max(1, Math.min(maxW, maxH))
-  screen.setScale(scale)
+export function computeScale(container, useWidthOnly) {
+  const w = container.clientWidth
+  const widthScale = Math.max(1, Math.floor(w / NATIVE_W))
+  if (useWidthOnly) return widthScale
+
+  const h = container.clientHeight
+  if (h === 0) return widthScale   // safety net for runtime layout collapse
+  const heightScale = Math.max(1, Math.floor(h / NATIVE_H))
+  return Math.min(widthScale, heightScale)
 }
 
-export async function runGame(canvas, registerAudio = () => {}) {
+export function runGame(canvas, registerAudio = () => {}) {
   const screen = createScreen(canvas)
   const audio = createAudio()
   registerAudio(audio)
   const input = createInput(canvas)
-  pickInitialScale(screen)
 
   const abortRejecters = new Set()
 
@@ -69,14 +72,7 @@ export async function runGame(canvas, registerAudio = () => {}) {
     const list = [...abortRejecters]
     abortRejecters.clear()
     for (const r of list) {
-      try {
-        r()
-      } catch (err) {
-        // A rejecter throwing means a tracked() promise is in an inconsistent state;
-        // swallow so one bad rejecter can't prevent others from firing, but log so
-        // the underlying bug isn't invisible.
-        console.warn('fireAbort: rejecter threw:', err)
-      }
+      try { r() } catch (err) { console.warn('fireAbort: rejecter threw:', err) }
     }
   }
 
@@ -111,28 +107,34 @@ export async function runGame(canvas, registerAudio = () => {}) {
 
   const ctx = { screen, audio, input, tracked, sleep }
 
-  window.addEventListener('resize', () => pickInitialScale(screen))
+  let destroyed = false
+  const setDestroyed = () => { destroyed = true }
 
   // ESC during play aborts whatever's awaiting and returns to the pre-title.
-  input.onEscape(() => {
+  const escUnsub = input.onEscape(() => {
     audio.flush()
     fireAbort()
   })
 
-  while (true) {
-    try {
-      await runMainFlow(ctx)
-      return   // user chose N to quit
-    } catch (err) {
-      if (err instanceof GameAbortedError) {
-        // Reset transient screen state — crashHandler may have aborted between
-        // setInverted(true) and setInverted(false), leaving the playfield flipped.
-        screen.setInverted(false)
-        continue   // ESC pressed; restart from the pre-title
+  const promise = (async () => {
+    while (!destroyed) {
+      try {
+        await runMainFlow(ctx)
+        return   // user chose N to quit
+      } catch (err) {
+        if (err instanceof GameAbortedError) {
+          if (destroyed) return
+          // Reset transient screen state — crashHandler may have aborted between
+          // setInverted(true) and setInverted(false), leaving the playfield flipped.
+          screen.setInverted(false)
+          continue   // ESC pressed; restart from the pre-title
+        }
+        throw err
       }
-      throw err
     }
-  }
+  })()
+
+  return { promise, screen, audio, input, fireAbort, escUnsub, setDestroyed }
 }
 
 async function runMainFlow(ctx) {

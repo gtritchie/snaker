@@ -47,7 +47,14 @@ function fireAbort() {
   const list = [...abortRejecters]
   abortRejecters.clear()
   for (const r of list) {
-    try { r() } catch {}
+    try {
+      r()
+    } catch (err) {
+      // A rejecter throwing means a tracked() promise is in an inconsistent state;
+      // swallow so one bad rejecter can't prevent others from firing, but log so
+      // the underlying bug isn't invisible.
+      console.warn('fireAbort: rejecter threw:', err)
+    }
   }
 }
 

@@ -54,7 +54,13 @@ export function createInput(canvas) {
         stale.reject(new Error('lineInput aborted by ESC'))
       }
       for (const h of [...escListeners]) {
-        try { h() } catch {}
+        try {
+          h()
+        } catch (err) {
+          // Don't let one buggy ESC handler stop the rest from firing — the abort
+          // chain has to keep working — but log so handler bugs aren't invisible.
+          console.warn('escape handler threw:', err)
+        }
       }
       return
     }

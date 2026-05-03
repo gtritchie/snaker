@@ -125,27 +125,33 @@ export function dotMultiplier(dots) {
 }
 
 // Frequency table: equal-tempered, A4 = 440 Hz.
+// CoCo PLAY's octave numbering is shifted up one from the standard MIDI scheme:
+// CoCo's "O3 D" plays at standard D4 (~293 Hz), confirmed by ear and by spectral
+// analysis of an emulator recording. So we add 2 (rather than 1) to the supplied
+// octave when computing the MIDI number.
 const NOTE_SEMITONE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }
 
 function noteFrequency(name, accidental, octave) {
-  const midi = (octave + 1) * 12 + NOTE_SEMITONE[name] + accidental
+  const midi = (octave + 2) * 12 + NOTE_SEMITONE[name] + accidental
   return 440 * Math.pow(2, (midi - 69) / 12)
 }
 
 function noteNumberFrequency(num, octave) {
-  const midi = (octave + 1) * 12 + (num - 1)
+  const midi = (octave + 2) * 12 + (num - 1)
   return 440 * Math.pow(2, (midi - 69) / 12)
 }
 
 // Calibration constant: how long is one whole note (length=1) at tempo T=1?
 // CoCo PLAY's tempo formula isn't strictly linear, but for our purposes the
-// approximation `note_seconds = WHOLE / (tempo * length)` works. At WHOLE=4 and
+// approximation `note_seconds = WHOLE / (tempo * length)` works. At WHOLE=4.4 and
 // the original game's settings:
-//   - Bublitchki (T=4 L=8):   4/(4*8)   = 125 ms/note   matches the original by ear
-//   - Step beep (T=255 L=4):  4/(255*4) = 3.9 ms/note   ≈ a brief click
-//   - Crash (T=2 L=8):        4/(2*8)   = 250 ms/note   ≈ a slow ominous tone
-// Tuned by ear against the original; reduce further to speed up, raise to slow down.
-const WHOLE_NOTE_SEC_AT_T_1 = 4
+//   - Bublitchki (T=4 L=8):   4.4/(4*8)   = 138 ms/note   matches emulator recording
+//   - Step beep (T=255 L=4):  4.4/(255*4) = 4.3 ms/note   ≈ a brief click
+//   - Crash (T=2 L=8):        4.4/(2*8)   = 275 ms/note   ≈ a slow ominous tone
+// Calibrated against an emulator recording of the title music: matching the
+// total played duration (~8.7s for Bublitchki) gave WHOLE = 4 * 8.715/7.968 ≈ 4.38,
+// rounded to 4.4.
+const WHOLE_NOTE_SEC_AT_T_1 = 4.4
 
 function eventDurationSec(eventLength, dotMul, tempo) {
   const wholeSec = WHOLE_NOTE_SEC_AT_T_1 / tempo

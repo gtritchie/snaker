@@ -18,7 +18,7 @@ I stumbled across this idea while playing with a [Timex Sinclair 1000](https://e
 
 ## JavaScript Port
 
-As I was building my website to list my past and current projects, I knew I'd have to include Snaker. I started by using Preview on the iPhone to capture the pages with the source listing from a physical copy of the magazine, then had Claude Cowork pull out the source from the pages and save it. From there I used Claude Code to create a JavaScript port.
+As I was building [my website](https://boringbydesign.ca) to list my past and current projects, I knew I'd have to include Snaker. I started by using Preview on the iPhone to capture the pages with the source listing from a physical copy of the magazine, then had Claude Cowork pull out the source from the pages and save it. From there I used Claude Code to create a JavaScript port.
 
 ## Other Games
 

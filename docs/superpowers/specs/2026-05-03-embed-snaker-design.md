@@ -224,7 +224,83 @@ Not intercepted. Letting Tab move focus away from the canvas is the right access
 - `lineInput` and `waitForKey` semantics.
 - The Esc-fires-fireAbort chain.
 
-## Section 4 — *(pending)*
+## Section 4 — CSS the engine applies + index.html slimming
+
+The current `index.html` puts engine-essential CSS (`touch-action: none`, `image-rendering: pixelated`, `display: block`) and host-page styling (`overflow: hidden`, full-viewport sizing, dark background, flex centering) in the same global stylesheet. A host page that copies the wrong half — or none of it — will see broken behavior.
+
+**Engine-applied inline styles**
+
+`boot()` applies the following to the canvas as inline styles, before the first `setScale()` call:
+
+```js
+canvas.style.imageRendering = 'pixelated'
+canvas.style.display = 'block'
+canvas.style.touchAction = 'none'
+```
+
+Inline styles win against host stylesheets without `!important`, so behavior is predictable. Hosts that genuinely want to override (e.g. a stylized `display: inline-block` debug variant) can still do so with `!important`.
+
+We deliberately **do not** set:
+- `outline: none` — browser focus rings are accessibility-relevant; let them render. Hosts can suppress per their own design.
+- `cursor` — host's call.
+- `background` — canvas surface is fully opaque during render (`cls(0)` fills VRAM with code 96 = solid green). No backdrop expectation.
+- `width` / `height` CSS — `setScale()` sets the canvas's intrinsic `width`/`height` attributes, which determine the rendered CSS box without an explicit CSS rule.
+
+`destroy()` removes these three inline styles by clearing them (`canvas.style.imageRendering = ''` etc.). The canvas returns to its pre-`boot()` style state.
+
+**Slimmed `index.html`**
+
+The standalone host page becomes:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Snaker</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; }
+    body { display: flex; align-items: center; justify-content: center; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <script type="module">
+    import { boot } from './src/main.js'
+    boot(document.getElementById('game'))
+  </script>
+</body>
+</html>
+```
+
+What was dropped from the original `index.html` and why:
+
+| Removed | Why |
+| --- | --- |
+| `body { overflow: hidden; touch-action: none }` | Engine no longer needs page-level scroll suppression; `touch-action` is now per-canvas. |
+| `body { color: #07ff00; font-family: monospace }` | Only affected non-canvas text; standalone has none. |
+| `<canvas>` `width="256" height="192"` attributes | `setScale()` overwrites them on first call. |
+| `<canvas>` `image-rendering`/`display: block` rules | Now applied inline by `boot()`. |
+
+What stays in `index.html`:
+
+- `html, body { margin: 0; height: 100%; background: #000 }` — host-page styling for the standalone view (full-viewport, dark backdrop).
+- `body { display: flex; ... }` — centers the canvas in the viewport, since the canvas size after scaling is smaller than the viewport in most cases. This is host-page concern, not engine concern.
+
+**The success-criteria snippet now works verbatim**
+
+```html
+<div style="width: 768px; aspect-ratio: 4/3;">
+  <canvas id="snaker"></canvas>
+</div>
+<script type="module">
+  import { boot } from './snaker/main.js'
+  boot(document.getElementById('snaker'))
+</script>
+```
+
+The host div sizes the canvas; `boot()` applies the three inline styles; the engine fills the canvas surface; page scroll and out-of-canvas keystrokes are unaffected.
 
 ## Section 5 — *(pending)*
 

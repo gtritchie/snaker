@@ -159,7 +159,11 @@ async function runMainFlow(screen, audio, input) {
 const WIN_PHRASES = [
   "V7  O2 T2 L8 F A O3 B C L4 F L8 C L4. F",
   "V>  O2 T2 L8 A O3 C E L4. G L8 E L4. G",
-  "V>  O3 T2 L8 C F A O4 L4 C O5 L8 A O4 L4. C",
+  // Original BASIC line 450 has O5 L8 A here, which lurches the penultimate note
+  // two octaves above the final O4 C resolution. Treating that as a 4-vs-5 typo:
+  // dropping to O4 keeps the C-F-A-C-A-C arpeggio cohesive and gives a step-approach
+  // lead-in to the final dotted quarter, matching the other two phrases' structure.
+  "V>  O3 T2 L8 C F A O4 L4 C O4 L8 A O4 L4. C",
 ]
 const ARPEGGIO = "T255 O1 E F G B C A E D A G F C E D C B G E A D D A B C G E A D G C A E F E B C E D G A E D B C D E D G B C E D C"
 

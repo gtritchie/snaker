@@ -177,6 +177,8 @@ export function createAudio() {
   let queueTime = 0
   let suspended = false  // when true, play() is a no-op so a hidden tab can't queue
                          // oscillators on a suspended context that would all fire on resume
+  let audioDisabled = false  // set if AudioContext can't be constructed; play() then
+                             // becomes a no-op aside from cross-call PLAY state updates
 
   // Cross-PLAY-call running state. Mirrors CoCo PLAY's stateful behavior.
   let runningTempo = 60
@@ -187,9 +189,29 @@ export function createAudio() {
 
   const activeNodes = new Set()
 
+  function stopOsc(osc) {
+    // osc.stop(0) on an already-stopped oscillator throws InvalidStateError; that's
+    // expected and ignorable. Any other error is a real bug worth surfacing.
+    try {
+      osc.stop(0)
+    } catch (err) {
+      if (err && err.name !== 'InvalidStateError') {
+        console.warn('audio: osc.stop failed:', err)
+      }
+    }
+  }
+
   function ensureContext() {
-    if (ac) return ac
-    ac = new AudioContext()
+    if (ac || audioDisabled) return ac
+    try {
+      const Ctor = globalThis.AudioContext || globalThis.webkitAudioContext
+      if (!Ctor) throw new Error('AudioContext not supported')
+      ac = new Ctor()
+    } catch (err) {
+      audioDisabled = true
+      console.warn('audio: AudioContext unavailable, audio disabled:', err)
+      return null
+    }
     masterGain = ac.createGain()
     masterGain.gain.value = 1.0
     masterGain.connect(ac.destination)
@@ -200,7 +222,7 @@ export function createAudio() {
   function resume() {
     suspended = false
     ensureContext()
-    if (ac.state === 'suspended') return ac.resume()
+    if (ac && ac.state === 'suspended') return ac.resume()
     return Promise.resolve()
   }
 
@@ -209,9 +231,7 @@ export function createAudio() {
     // Drop anything currently scheduled so it can't fire as a burst when the
     // context resumes later.
     if (ac) {
-      for (const osc of activeNodes) {
-        try { osc.stop(0) } catch {}
-      }
+      for (const osc of activeNodes) stopOsc(osc)
       activeNodes.clear()
       queueTime = ac.currentTime
     }
@@ -221,9 +241,7 @@ export function createAudio() {
 
   function flush() {
     if (!ac) return
-    for (const osc of activeNodes) {
-      try { osc.stop(0) } catch {}
-    }
+    for (const osc of activeNodes) stopOsc(osc)
     activeNodes.clear()
     queueTime = ac.currentTime
   }
@@ -247,45 +265,59 @@ export function createAudio() {
 
   function play(playString) {
     // State events (tempo, octave, length, volume) are applied even while suspended
-    // so cross-call PLAY state stays consistent. Note/rest events are skipped while
-    // suspended — no oscillators are scheduled and queueTime is not advanced — so
-    // a hidden tab cannot queue a burst that would all fire on resume.
-    if (!suspended) ensureContext()
-    if (ac && queueTime < ac.currentTime) queueTime = ac.currentTime
+    // or audio-disabled so cross-call PLAY state stays consistent. Note/rest events
+    // are skipped in those cases — no oscillators are scheduled and queueTime is
+    // not advanced — so a hidden tab cannot queue a burst that fires on resume,
+    // and a missing AudioContext does not crash the game.
+    //
+    // The whole body is wrapped in try/catch so synchronous errors (e.g. a future
+    // malformed PLAY string or a Web Audio scheduling failure) don't propagate up
+    // to fire-and-forget callers as unhandled rejections.
+    try {
+      if (!suspended) ensureContext()
+      if (ac && queueTime < ac.currentTime) queueTime = ac.currentTime
 
-    const events = parsePlayString(playString)
-    const start = queueTime
+      const events = parsePlayString(playString)
+      const start = queueTime
+      const skipScheduling = suspended || audioDisabled
 
-    for (const e of events) {
-      if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }
-      if (e.type === 'octave') { runningOctave = applyStateOp(runningOctave, e); continue }
-      if (e.type === 'length') {
-        runningLength = applyStateOp(runningLength, e)
-        runningLengthDots = e.dots ?? 0
-        continue
+      for (const e of events) {
+        if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }
+        if (e.type === 'octave') { runningOctave = applyStateOp(runningOctave, e); continue }
+        if (e.type === 'length') {
+          runningLength = applyStateOp(runningLength, e)
+          runningLengthDots = e.dots ?? 0
+          continue
+        }
+        if (e.type === 'volume') { runningVolume = applyStateOp(runningVolume, e); continue }
+
+        if (skipScheduling) continue
+
+        if (e.type === 'rest') {
+          const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
+          queueTime += eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
+        } else if (e.type === 'note') {
+          const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
+          const dur = eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
+          const freq = noteFrequency(e.name, e.accidental, runningOctave)
+          scheduleTone(freq, dur, volumeToGain(runningVolume))
+          queueTime += dur
+        } else if (e.type === 'noteNumber') {
+          const dotMul = dotMultiplier(runningLengthDots)
+          const dur = eventDurationSec(runningLength, dotMul, runningTempo)
+          const freq = noteNumberFrequency(e.number, runningOctave)
+          scheduleTone(freq, dur, volumeToGain(runningVolume))
+          queueTime += dur
+        }
       }
-      if (e.type === 'volume') { runningVolume = applyStateOp(runningVolume, e); continue }
 
-      if (suspended) continue   // skip scheduling for note/rest events while hidden
-
-      if (e.type === 'rest') {
-        const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
-        queueTime += eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
-      } else if (e.type === 'note') {
-        const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
-        const dur = eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
-        scheduleTone(noteFrequency(e.name, e.accidental, runningOctave), dur, volumeToGain(runningVolume))
-        queueTime += dur
-      } else if (e.type === 'noteNumber') {
-        const dur = eventDurationSec(runningLength, dotMultiplier(runningLengthDots), runningTempo)
-        scheduleTone(noteNumberFrequency(e.number, runningOctave), dur, volumeToGain(runningVolume))
-        queueTime += dur
-      }
+      if (skipScheduling) return Promise.resolve()
+      const totalSec = queueTime - start
+      return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
+    } catch (err) {
+      console.warn('audio.play failed:', err)
+      return Promise.resolve()
     }
-
-    if (suspended) return Promise.resolve()
-    const totalSec = queueTime - start
-    return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
   }
 
   function stop() {

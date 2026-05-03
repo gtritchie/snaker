@@ -267,30 +267,29 @@ export function createAudio() {
     // are skipped in those cases — no oscillators are scheduled and queueTime is
     // not advanced — so a hidden tab cannot queue a burst that fires on resume,
     // and a missing AudioContext does not crash the game.
-    //
-    // The whole body is wrapped in try/catch so synchronous errors (e.g. a future
-    // malformed PLAY string or a Web Audio scheduling failure) don't propagate up
-    // to fire-and-forget callers as unhandled rejections.
-    try {
-      if (!suspended) ensureContext()
-      if (ac && queueTime < ac.currentTime) queueTime = ac.currentTime
+    if (!suspended) ensureContext()
+    if (ac && queueTime < ac.currentTime) queueTime = ac.currentTime
 
-      const events = parsePlayString(playString)
-      const start = queueTime
-      const skipScheduling = suspended || audioDisabled
+    const events = parsePlayString(playString)
+    const start = queueTime
+    const skipScheduling = suspended || audioDisabled
 
-      for (const e of events) {
-        if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }
-        if (e.type === 'octave') { runningOctave = applyStateOp(runningOctave, e); continue }
-        if (e.type === 'length') {
-          runningLength = applyStateOp(runningLength, e)
-          runningLengthDots = e.dots ?? 0
-          continue
-        }
-        if (e.type === 'volume') { runningVolume = applyStateOp(runningVolume, e); continue }
+    for (const e of events) {
+      if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }
+      if (e.type === 'octave') { runningOctave = applyStateOp(runningOctave, e); continue }
+      if (e.type === 'length') {
+        runningLength = applyStateOp(runningLength, e)
+        runningLengthDots = e.dots ?? 0
+        continue
+      }
+      if (e.type === 'volume') { runningVolume = applyStateOp(runningVolume, e); continue }
 
-        if (skipScheduling) continue
+      if (skipScheduling) continue
 
+      // Narrow catch around the Web Audio surface only: a scheduling failure for
+      // one event must not abort the rest of the PLAY string, and must not be
+      // confused with a parser/state-update bug, which propagates instead.
+      try {
         if (e.type === 'rest') {
           const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
           queueTime += eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
@@ -307,25 +306,15 @@ export function createAudio() {
           scheduleTone(freq, dur, volumeToGain(runningVolume))
           queueTime += dur
         }
+      } catch (err) {
+        console.error('audio.play: scheduling failed', { playString, event: e, err })
       }
-
-      if (skipScheduling) return Promise.resolve()
-      const totalSec = queueTime - start
-      return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
-    } catch (err) {
-      console.warn('audio.play failed:', err)
-      return Promise.resolve()
     }
+
+    if (skipScheduling) return Promise.resolve()
+    const totalSec = queueTime - start
+    return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
   }
 
-  function stop() {
-    if (!ac) return
-    ac.close()
-    ac = null
-    masterGain = null
-    queueTime = 0
-    activeNodes.clear()
-  }
-
-  return { play, stop, resume, suspend, flush }
+  return { play, resume, suspend, flush }
 }

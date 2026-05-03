@@ -13,6 +13,14 @@ export const NATIVE_HEIGHT = ROWS * FONT_HEIGHT  // 192
 export function createScreen(canvas) {
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas 2D context unavailable')
+
+  // Make the backing store match scale=1 explicitly, so a setScale(1) call is
+  // correctly a no-op (rather than the canvas staying at the browser default
+  // 300x150 after index.html drops its width/height attrs). Set
+  // imageSmoothingEnabled AFTER the resize — assigning canvas.width resets
+  // the 2D context state, so an earlier set would be wiped.
+  canvas.width = NATIVE_WIDTH
+  canvas.height = NATIVE_HEIGHT
   ctx.imageSmoothingEnabled = false
 
   const vram = new Uint8Array(VRAM_SIZE)
@@ -20,7 +28,9 @@ export function createScreen(canvas) {
   let inverted = false   // global crash-flash flip; SCREEN 0,1 / SCREEN 0,0 in the original
 
   function setScale(s) {
-    scale = Math.max(1, Math.floor(s))
+    const next = Math.max(1, Math.floor(s))
+    if (next === scale) return
+    scale = next
     canvas.width = NATIVE_WIDTH * scale
     canvas.height = NATIVE_HEIGHT * scale
     ctx.imageSmoothingEnabled = false

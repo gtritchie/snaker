@@ -35,7 +35,7 @@ Snaker is built as a self-contained engine — drop it into any host page.
   <canvas id="snaker"></canvas>
 </div>
 <script type="module">
-  import { boot } from './snaker/main.js'
+  import { boot } from './src/main.js'
   boot(document.getElementById('snaker'))
 </script>
 ```

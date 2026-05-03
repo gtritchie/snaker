@@ -113,19 +113,16 @@ export function getDefinedChars() {
 // `x` and `y` are top-left coordinates in canvas pixels (already multiplied by scale).
 //
 // Character code semantics:
-//   32-63:    space, punctuation, digits — the CoCo VDG's "alphanumeric inverse" range
-//   64-95:    uppercase letters and a few symbols — the VDG's "alphanumeric normal" range
-//   96:       "blank playable cell" sentinel — falls in the VDG's semigraphics-6 range
-//             on real hardware and renders as a SOLID GREEN BLOCK. CoCo BASIC's CLS
-//             fills the screen with this code, which is also why the gameplay's
-//             collision check is "IF PEEK(P)<>96 THEN crash" — 96 doubles as both
-//             the CLS fill value and the "snake may enter" sentinel.
-//   128-255:  semigraphics color block (see decodeSemigraphic)
+//   0-127:    alphanumeric (text). CoCo BASIC default is BLACK CHARACTER on GREEN
+//             BACKGROUND. Spaces and other unprinted bits leave the cell as solid
+//             green (continuous with the screen background filled by CLS).
+//   96:       "blank playable cell" sentinel. Same green appearance as a space; also
+//             the value the gameplay collision check looks for ("IF PEEK(P)<>96").
+//   128-255:  semigraphics color block (see decodeSemigraphic).
 //
-// `inverse` is the FINAL rendering mode for the cell (true = green bg + black pattern,
-// false = black bg + green pattern). The caller composes intrinsic VDG inverse, any
-// per-cell force-inverse flag, and the global crash-flash flip into this single boolean
-// before calling drawCell.
+// `inverse` is the global crash-flash flip — when true, every cell renders inverted
+// (green character on black background, solid black for spaces). Used only by
+// SCREEN 0,1 / SCREEN 0,0 in the original; reproduced here via screen.setInverted.
 export function drawCell(ctx, code, x, y, scale, inverse = false) {
   const w = FONT_WIDTH * scale
   const h = FONT_HEIGHT * scale
@@ -135,17 +132,13 @@ export function drawCell(ctx, code, x, y, scale, inverse = false) {
     return
   }
 
-  // Code 96: solid green block by default; flips to black under crash-flash invert.
-  if (code === 96) {
-    ctx.fillStyle = inverse ? '#000000' : '#07ff00'
-    ctx.fillRect(x, y, w, h)
-    return
-  }
-
-  const bg = inverse ? '#07ff00' : '#000000'
-  const fg = inverse ? '#000000' : '#07ff00'
+  const bg = inverse ? '#000000' : '#07ff00'
+  const fg = inverse ? '#07ff00' : '#000000'
   ctx.fillStyle = bg
   ctx.fillRect(x, y, w, h)
+
+  // Code 96 (SG6 blank) and code 32 (space) both render as solid bg with no glyph.
+  if (code === 96 || code === 32) return
 
   const glyph = getCharGlyph(String.fromCharCode(code))
   ctx.fillStyle = fg
@@ -160,12 +153,6 @@ export function drawCell(ctx, code, x, y, scale, inverse = false) {
   }
 }
 
-// Helper for callers: given a character code and an optional force-inverse flag,
-// returns the cell's "natural" inverse state (intrinsic VDG inverse OR forced).
-export function naturalInverse(code, forceInverse = false) {
-  if (forceInverse) return true
-  return code >= 32 && code <= 63
-}
 
 function drawSemigraphic(ctx, code, x, y, scale) {
   const decoded = decodeSemigraphic(code)

@@ -203,7 +203,9 @@ async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
       for (let i = promptOffset; i < 32; i++) screen.poke(1024 + i, 32)
       screen.printAt(promptOffset, prompt)
       const cursorPos = promptOffset + prompt.length
-      if (cursorPos < 32) screen.poke(1024 + cursorPos, 143)
+      // Yellow (semigraphic 159 = all-quadrants color 1) so the cursor stands out
+      // against the surrounding green text background.
+      if (cursorPos < 32) screen.poke(1024 + cursorPos, 159)
       name = buffer
     },
   }))
@@ -406,7 +408,7 @@ async function titleScreen(screen, audio, input) {
   // to resume the AudioContext. Styled to match the CoCo BASIC command-line look:
   // black text on a uniform green background.
   for (let i = 0; i < 512; i++) screen.poke(1024 + i, 32) // code 32 = solid green block
-  screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM', { inverse: true })
+  screen.printAt(224, 'PRESS ANY KEY TO RUN THE PROGRAM')
   await tracked(input.waitForKey())
   await audio.resume()
 

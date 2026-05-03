@@ -1,4 +1,4 @@
-import { drawCell, naturalInverse, FONT_WIDTH, FONT_HEIGHT } from './glyphs.js'
+import { drawCell, FONT_WIDTH, FONT_HEIGHT } from './glyphs.js'
 
 const COLS = 32
 const ROWS = 16
@@ -15,9 +15,8 @@ export function createScreen(canvas) {
   ctx.imageSmoothingEnabled = false
 
   const vram = new Uint8Array(VRAM_SIZE)
-  const inverseFlags = new Uint8Array(VRAM_SIZE)
   let scale = 1
-  let inverted = false
+  let inverted = false   // global crash-flash flip; SCREEN 0,1 / SCREEN 0,0 in the original
 
   function setScale(s) {
     scale = Math.max(1, Math.floor(s))
@@ -36,14 +35,8 @@ export function createScreen(canvas) {
     const row = Math.floor(offset / COLS)
     const x = col * FONT_WIDTH * scale
     const y = row * FONT_HEIGHT * scale
-    // Treat zero-filled (uninitialized) VRAM as code 32 so the inverse computation
-    // and the drawCell call see the same code — keeps the substituted space's
-    // intrinsic green-block bg consistent.
     const renderCode = vram[offset] === 0 ? 32 : vram[offset]
-    // Compose: per-cell force flag OR intrinsic VDG inverse, then XOR global crash flash.
-    const natural = naturalInverse(renderCode, !!inverseFlags[offset])
-    const effective = natural !== inverted
-    drawCell(ctx, renderCode, x, y, scale, effective)
+    drawCell(ctx, renderCode, x, y, scale, inverted)
   }
 
   function offsetOf(addr) {
@@ -56,7 +49,6 @@ export function createScreen(canvas) {
     const off = offsetOf(addr)
     if (off < 0) return
     vram[off] = code & 0xff
-    inverseFlags[off] = 0
     renderCell(off)
   }
 
@@ -66,19 +58,16 @@ export function createScreen(canvas) {
   }
 
   // Print a string at video-RAM offset (0..511) — equivalent to BASIC PRINT@offset.
-  // Lowercase letters always render in inverse video (CoCo convention).
-  // Pass { inverse: true } to force every cell into inverse mode, which simulates the
-  // CoCo BASIC "command line" black-on-green look (uppercase letters, spaces, and
-  // symbols all render as black-on-green).
-  function printAt(offset, str, options = {}) {
-    const forceInverse = options.inverse === true
+  // Lowercase letters are translated to their uppercase code (CoCo BASIC does the
+  // same; the original VDG has no separate lowercase glyphs, and all alphanumeric
+  // text renders black-on-green by default).
+  function printAt(offset, str) {
     for (let i = 0; i < str.length; i++) {
       const idx = offset + i
       if (idx < 0 || idx >= VRAM_SIZE) continue
       const ch = str.charCodeAt(i)
       const isLower = ch >= 97 && ch <= 122
       vram[idx] = isLower ? ch - 32 : ch
-      inverseFlags[idx] = (isLower || forceInverse) ? 1 : 0
       renderCell(idx)
     }
   }
@@ -93,7 +82,6 @@ export function createScreen(canvas) {
   function cls(colorIndex = 0) {
     const code = colorIndex === 0 ? 96 : 128 + (((colorIndex - 1) & 0x7) << 4) + 15
     vram.fill(code)
-    inverseFlags.fill(0)
     redrawAll()
   }
 
@@ -108,12 +96,8 @@ export function createScreen(canvas) {
   // make rows of cars rise visually as new cars are added at the bottom row.
   function scrollUp() {
     vram.copyWithin(0, 32, VRAM_SIZE)
-    inverseFlags.copyWithin(0, 32, VRAM_SIZE)
     const lastRow = VRAM_SIZE - COLS
-    for (let i = lastRow; i < VRAM_SIZE; i++) {
-      vram[i] = 96
-      inverseFlags[i] = 0
-    }
+    for (let i = lastRow; i < VRAM_SIZE; i++) vram[i] = 96
     redrawAll()
   }
 

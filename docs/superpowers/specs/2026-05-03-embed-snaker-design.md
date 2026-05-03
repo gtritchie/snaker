@@ -230,9 +230,14 @@ The current `index.html` puts engine-essential CSS (`touch-action: none`, `image
 
 **Engine-applied inline styles**
 
-`boot()` applies the following to the canvas as inline styles, before the first `setScale()` call:
+`boot()` snapshots the canvas's existing inline values for the three properties it manages, then sets its own values, before the first `setScale()` call:
 
 ```js
+const priorStyles = {
+  imageRendering: canvas.style.imageRendering,
+  display:        canvas.style.display,
+  touchAction:    canvas.style.touchAction,
+}
 canvas.style.imageRendering = 'pixelated'
 canvas.style.display = 'block'
 canvas.style.touchAction = 'none'
@@ -246,7 +251,15 @@ We deliberately **do not** set:
 - `background` — canvas surface is fully opaque during render (`cls(0)` fills VRAM with code 96 = solid green). No backdrop expectation.
 - `width` / `height` CSS — `setScale()` sets the canvas's intrinsic `width`/`height` attributes, which determine the rendered CSS box without an explicit CSS rule.
 
-`destroy()` removes these three inline styles by clearing them (`canvas.style.imageRendering = ''` etc.). The canvas returns to its pre-`boot()` style state.
+`destroy()` restores the snapshot rather than clearing the properties:
+
+```js
+canvas.style.imageRendering = priorStyles.imageRendering
+canvas.style.display        = priorStyles.display
+canvas.style.touchAction    = priorStyles.touchAction
+```
+
+If the host had no prior inline value, the snapshot is `''` and the assignment removes the property (matching pre-`boot()` state). If the host had set one explicitly (e.g. `canvas.style.display = 'inline-block'` for some debug overlay), `destroy()` restores it. The canvas returns to its true pre-`boot()` style state in both cases.
 
 **Slimmed `index.html`**
 

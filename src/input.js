@@ -1,10 +1,15 @@
-// Three discrete delay values (ms) for keyboard speed. Calibrated against an
-// emulator: a no-collision descent on real CoCo takes ~29s, so per-segment
-// pacing at default speed is ~150ms across the 196 inner-loop iterations
-// (14 rows × 7 codes × 2 passes).
-const SPEED_FAST = 60
-const SPEED_NORMAL = 160
-const SPEED_SLOW = 400
+// Three discrete delay values (ms) for keyboard speed. Each value is meant to
+// match a per-iteration wallclock duration on real CoCo, which decomposes as
+// `PLAY "O2 T255 G O3 C"` (~102 ms, fixed) + `FOR PP=1 TO SP NEXT` running at
+// the high-speed CPU rate of ~690 iterations/sec (1.5× the slow-speed reference
+// of 460 iter/sec). My audio.play step beep is fire-and-forget, so the entire
+// iteration time has to live in sleep().
+//   ↑ key → SP=0:   ~102 ms (just the PLAY portion)
+//   no key → SP≈32: ~148 ms  (PLAY + 46 ms FOR loop)
+//   ↓ key → SP=63:  ~193 ms  (PLAY + 91 ms FOR loop)
+const SPEED_FAST = 100
+const SPEED_NORMAL = 150
+const SPEED_SLOW = 200
 
 function computeX(left, right) {
   return (right ? 1 : 0) - (left ? 1 : 0)

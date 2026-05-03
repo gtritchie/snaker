@@ -191,8 +191,9 @@ async function showScore(screen, audio, elapsed) {
       await tracked(audio.play(`T255 O${o} N${n}`))
     }
   }
-  await sleep(4000)  // BASIC FOR PP=1 TO 1800 at slow speed (high-speed POKE was
-                     // turned off on line 430 before the win sequence) ≈ 4 seconds.
+  await sleep(3913)  // BASIC FOR PP=1 TO 1800 at slow speed (460 iter/sec):
+                     // 1800 / 460 ≈ 3.913 s. High-speed POKE was turned off on
+                     // BASIC line 430 before the win sequence.
   return timeStr
 }
 
@@ -242,7 +243,7 @@ async function showBestScore(screen, audio) {
       await tracked(audio.play(`T255 O${o} N${n}`))
     }
   }
-  await sleep(4000)  // matching BASIC line 660's FOR PP=1 TO 1800 pause at slow speed
+  await sleep(3913)  // BASIC line 660: FOR PP=1 TO 1800 at slow speed (460 iter/sec)
 }
 
 async function playAgainPrompt(screen, audio, input) {

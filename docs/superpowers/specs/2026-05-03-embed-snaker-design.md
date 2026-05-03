@@ -315,6 +315,74 @@ What stays in `index.html`:
 
 The host div sizes the canvas; `boot()` applies the three inline styles; the engine fills the canvas surface; page scroll and out-of-canvas keystrokes are unaffected.
 
-## Section 5 — *(pending)*
+## Section 5 — Cleanup (full `destroy()` inventory)
+
+`destroy()` must unwind everything `boot()` (and its callees) established. The contract per Section 1: idempotent, synchronous, returns nothing.
+
+**State `boot()` establishes**
+
+| Established by | Owned by | Cleaned up by `destroy()` how |
+| --- | --- | --- |
+| `document.addEventListener('visibilitychange', …)` (`src/main.js:16`) | `boot` closure | `removeEventListener` |
+| Canvas `mousedown` focus helper (Section 3) | `boot` closure | `removeEventListener` |
+| Canvas `keydown`/`keyup`/`touch*` listeners (`src/input.js`) | `createInput` closure | call existing `input.destroy()` |
+| `ResizeObserver` on container (Section 2) | `boot` closure | `ro.disconnect()` |
+| `input.onEscape(...)` registration (`src/game.js:117`) | `createInput` Set | call the unsubscribe returned by `onEscape` |
+| Pending `tracked()` rejecters in `game.js`'s module-level `Set` | `tracked` | `fireAbort()` rejects them all |
+| `runGame()`'s `while (true)` loop | `runGame` | needs a destroy flag — see below |
+| Audio scheduling state + `AudioContext` running state | `createAudio` | `audio.flush(); audio.suspend()` |
+| Inline styles on canvas (3 properties, Section 4) | `boot` closure | restore from snapshot |
+| `canvas.tabIndex = 0` (Section 3, only if we set it) | `boot` closure | restore prior `hasAttribute('tabindex')` state |
+| Active-canvas entry in module-level `WeakMap` (Section 1) | `boot` module | `weakMap.delete(canvas)` |
+
+**Stopping the `while (true)` loop**
+
+`runGame()`'s outer loop currently catches `GameAbortedError` and `continue`s — fine for Esc-restart, wrong for destroy. Add a `destroyed` flag in the closure that the catch block consults:
+
+```js
+let destroyed = false
+
+while (!destroyed) {
+  try {
+    await runMainFlow(screen, audio, input)
+    return
+  } catch (err) {
+    if (err instanceof GameAbortedError) {
+      if (destroyed) return
+      screen.setInverted(false)
+      continue
+    }
+    throw err
+  }
+}
+```
+
+`destroy()` sets `destroyed = true`, then calls `fireAbort()`. The currently-awaited `tracked()` promise rejects with `GameAbortedError`, the catch block sees `destroyed`, and the loop returns. The runGame promise then settles (resolves), and any `.catch` chained in `boot()` is a no-op since destroy is the legitimate exit.
+
+**Order of operations in `destroy()`**
+
+1. If already destroyed, return (idempotency).
+2. Mark `destroyed = true`.
+3. Disconnect `ResizeObserver` (no more scale recomputes).
+4. Remove `document` `visibilitychange` listener.
+5. Remove canvas `mousedown` focus helper.
+6. Call `input.destroy()` (removes canvas key/touch listeners).
+7. `audio.flush()` then `audio.suspend()` (cancel scheduled oscillators, then suspend context).
+8. `fireAbort()` (rejects in-flight `tracked()` promises; runGame loop returns).
+9. Restore inline styles from snapshot.
+10. Restore `tabindex` attribute state.
+11. `activeCanvases.delete(canvas)`.
+
+Listener removal precedes the abort so no new events can land mid-teardown. Audio teardown precedes abort so no fresh `audio.play()` can fire from a still-running iteration.
+
+**What `destroy()` does NOT do**
+
+- Does not clear the canvas pixel buffer. The host page may want to display a "game ended" backdrop, render a thumbnail, or just leave the last frame visible. Hosts who want a blank canvas can do `canvas.getContext('2d').clearRect(...)` themselves.
+- Does not remove the `<canvas>` from the DOM. The host owns the element.
+- Does not close the `AudioContext`. `suspend()` is reversible if the host re-boots; `close()` is permanent and would prevent a fresh `boot()` on the same page from getting audio (browsers limit one `AudioContext` per page in some cases).
+
+**`createInput.destroy()` change**
+
+Currently (`src/input.js:200-209`) it removes window-scoped listeners. Per Section 3 those move to canvas, so this updates accordingly. No new public surface.
 
 ## Section 6 — *(pending)*

@@ -186,21 +186,24 @@ async function showScore(screen, audio, elapsed) {
 }
 
 async function captureNewBestScore(screen, audio, input, elapsed, displayTime) {
-  // BASIC lines 790-800.
+  // BASIC line 790: PRINT"WHAT IS YOUR NAME";:LINE INPUT">>>>?";N$
+  // The trailing semicolon on PRINT suppresses the carriage return, so ">>>>?" and
+  // the user's input continue on the same row right after the prompt.
   screen.cls(rnd(8))
-  screen.printAt(0, 'WHAT IS YOUR NAME')
+  const messageOffset = 0
+  const promptOffset = messageOffset + 'WHAT IS YOUR NAME'.length  // 17
+  screen.printAt(messageOffset, 'WHAT IS YOUR NAME')
 
   let name = ''
   await tracked(input.lineInput({
-    maxLength: 12,
+    maxLength: 32 - promptOffset - '>>>>?'.length - 1,  // leave room for cursor
     render(buffer) {
-      const promptOffset = 32
       const prompt = '>>>>?' + buffer
-      // Blank the row first.
-      for (let i = 0; i < 32; i++) screen.poke(1024 + promptOffset + i, 32)
+      // Blank the prompt+input region (everything from promptOffset to end of row).
+      for (let i = promptOffset; i < 32; i++) screen.poke(1024 + i, 32)
       screen.printAt(promptOffset, prompt)
       const cursorPos = promptOffset + prompt.length
-      if (cursorPos < promptOffset + 32) screen.poke(1024 + cursorPos, 143)
+      if (cursorPos < 32) screen.poke(1024 + cursorPos, 143)
       name = buffer
     },
   }))

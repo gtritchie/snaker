@@ -160,6 +160,21 @@ export function createInput(canvas) {
     canvas.addEventListener('touchcancel', onTouchEnd,  { passive: false })
   }
 
+  // Resolve any pending waitForKey on canvas mousedown — mirrors the same
+  // path in onTouchStart so a single click/tap advances "press any key"
+  // prompts. Without this, desktop users had to click (for focus) AND then
+  // press a key, and Chrome DevTools mobile emulation swallowed the first
+  // tap (it fires mousedown but no touchstart on the first interaction).
+  // Skipped while a lineInput buffer is collecting characters — pointer
+  // input shouldn't accidentally submit the player's name.
+  function onMouseWake() {
+    if (lineInputState === null && keyListeners.length > 0) {
+      const resolvers = keyListeners.splice(0)
+      for (const r of resolvers) r(' ')
+    }
+  }
+  canvas.addEventListener('mousedown', onMouseWake)
+
   canvas.addEventListener('keydown', onKeyDown)
   canvas.addEventListener('keyup', onKeyUp)
 
@@ -209,6 +224,7 @@ export function createInput(canvas) {
   function destroy() {
     canvas.removeEventListener('keydown', onKeyDown)
     canvas.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('mousedown', onMouseWake)
     canvas.removeEventListener('blur', onBlur)
     if (isTouchDevice) {
       canvas.removeEventListener('touchstart', onTouchStart)

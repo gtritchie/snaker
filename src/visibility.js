@@ -55,7 +55,10 @@ export function createVisibilityGate(opts = {}) {
       hiddenSince = t
       for (const s of [...active]) park(s, t)
       const a = audioRef()
-      if (a) Promise.resolve(a.suspend()).catch(err => console.warn('audio: visibility suspend failed:', err))
+      if (a) {
+        Promise.resolve(a.suspend()).catch(err =>
+          console.warn('audio: visibility suspend failed:', err))
+      }
     } else if (document.visibilityState !== 'hidden' && hidden) {
       hidden = false
       if (hiddenSince !== null) totalHiddenMs += t - hiddenSince
@@ -65,7 +68,10 @@ export function createVisibilityGate(opts = {}) {
         start(s, t)
       }
       const a = audioRef()
-      if (a) Promise.resolve(a.resume()).catch(err => console.warn('audio: visibility resume failed:', err))
+      if (a) {
+        Promise.resolve(a.resume()).catch(err =>
+          console.warn('audio: visibility resume failed:', err))
+      }
     }
   }
   document.addEventListener('visibilitychange', onVisibilityChange)

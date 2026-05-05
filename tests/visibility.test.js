@@ -180,7 +180,7 @@ test('destroy() rejects in-flight sleeps with VisibilityGateDestroyedError', asy
   g.sleep(1000).catch(e => { err = e })
   g.destroy()
   await Promise.resolve()
-  assertTrue(err instanceof VisibilityGateDestroyedError, 'expected VisibilityGateDestroyedError, got: ' + (err && err.name))
+  assertTrue(err instanceof VisibilityGateDestroyedError)
 })
 
 test('destroy() rejects parked sleeps too', async () => {

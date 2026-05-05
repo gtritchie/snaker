@@ -272,7 +272,12 @@ export function createAudio() {
 
     const events = parsePlayString(playString)
     const start = queueTime
-    const skipScheduling = suspended || audioDisabled
+    // Also skip when ac.state isn't 'running' — Chrome mobile and iOS Safari
+    // take a few ms to transition the context from 'suspended' to 'running'
+    // after ac.resume() is called. play() calls during that window would
+    // schedule oscillators at times that elapse before the context unlocks
+    // (producing one autoplay warning per scheduleTone and silent output).
+    const skipScheduling = suspended || audioDisabled || (ac && ac.state !== 'running')
 
     for (const e of events) {
       if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }

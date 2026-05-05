@@ -447,7 +447,13 @@ async function titleScreen(ctx) {
   screen.printAt(360, 'ABORT GAME: ESC')
   screen.printAt(417, 'TOUCH SCREEN: VIRTUAL JOYSTICK')
   await tracked(input.waitForKey())
-  await audio.resume().catch(err => {
+  // Fire-and-forget the resume: on Chrome mobile and iOS Safari, when the
+  // autoplay policy blocks an AudioContext.resume() call, the returned promise
+  // can hang indefinitely (neither resolves nor rejects), which would freeze
+  // the gameplay flow. The unlock side effect happens regardless of whether we
+  // await the promise; .catch() prevents an unhandled-rejection warning if the
+  // browser does choose to reject.
+  audio.resume().catch(err => {
     console.warn('audio: resume blocked, continuing muted:', err)
   })
 
@@ -477,7 +483,8 @@ async function setup(ctx) {
   // with stepped tones. We await each play() so the visual pacing matches the audio
   // (the original BASIC's PLAY blocks). Without awaiting, fire-and-forget plays
   // queue many seconds of audio behind a sub-second visual loop.
-  await audio.resume().catch(err => {
+  // Fire-and-forget the resume — see titleScreen for why we don't await.
+  audio.resume().catch(err => {
     console.warn('audio: resume blocked, continuing muted:', err)
   })
   screen.cls(0)

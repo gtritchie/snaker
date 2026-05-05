@@ -99,3 +99,76 @@ test('visibleNow handles a hidden interval that precedes runStart', () => {
   env.advance(5000)              // 5 s visible play
   assertEquals(g.visibleNow() - runStart, 5000)
 })
+
+test('sleep(100) resolves after 100 ms of visible time', async () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  let resolved = false
+  g.sleep(100).then(() => { resolved = true })
+  env.advance(99)
+  await Promise.resolve()
+  assertEquals(resolved, false, 'should not resolve before 100 ms')
+  env.advance(1)
+  await Promise.resolve()
+  assertEquals(resolved, true, 'should resolve at 100 ms')
+})
+
+test('sleep parked at 80/100 resumes with remaining 20 after a hidden interval', async () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  let resolved = false
+  g.sleep(100).then(() => { resolved = true })
+  env.advance(80)                  // 20 ms remaining when we hide
+  env.setVisibility('hidden')
+  env.advance(30000)               // 30 s hidden
+  await Promise.resolve()
+  assertEquals(resolved, false, 'should not resolve while hidden')
+  env.setVisibility('visible')
+  env.advance(19)
+  await Promise.resolve()
+  assertEquals(resolved, false, 'should not resolve before remaining 20 ms')
+  env.advance(1)
+  await Promise.resolve()
+  assertEquals(resolved, true, 'should resolve after the remaining 20 ms')
+})
+
+test('two concurrent sleeps both park and both resume with their respective remaining ms', async () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  let r50 = false, r150 = false
+  g.sleep(50).then(() => { r50 = true })
+  g.sleep(150).then(() => { r150 = true })
+  env.advance(20)                  // both still in flight; 30/130 remaining
+  env.setVisibility('hidden')
+  env.advance(1000)
+  env.setVisibility('visible')
+  env.advance(29)
+  await Promise.resolve()
+  assertEquals(r50, false)
+  env.advance(1)
+  await Promise.resolve()
+  assertEquals(r50, true, 'first sleep resolves at remaining 30')
+  env.advance(99)
+  await Promise.resolve()
+  assertEquals(r150, false)
+  env.advance(1)
+  await Promise.resolve()
+  assertEquals(r150, true, 'second sleep resolves at remaining 130')
+})
+
+test('sleep(100) on a gate constructed while hidden does not resolve until visible', async () => {
+  const env = makeFakeEnv(true)    // initiallyHidden = true
+  const g = makeGate(env)
+  let resolved = false
+  g.sleep(100).then(() => { resolved = true })
+  env.advance(10000)               // 10 s of hidden time
+  await Promise.resolve()
+  assertEquals(resolved, false, 'parked sleep must not fire while hidden')
+  env.setVisibility('visible')
+  env.advance(99)
+  await Promise.resolve()
+  assertEquals(resolved, false)
+  env.advance(1)
+  await Promise.resolve()
+  assertEquals(resolved, true, 'resolves at full 100 ms after becoming visible')
+})

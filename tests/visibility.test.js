@@ -214,7 +214,7 @@ test('audio.suspend() called on hide, audio.resume() called on show', () => {
   const env = makeFakeEnv()
   let suspends = 0, resumes = 0
   const audio = { suspend: () => { suspends++ }, resume: () => { resumes++ } }
-  const g = makeGate(env, { audioRef: () => audio })
+  makeGate(env, { audioRef: () => audio })
   env.setVisibility('hidden')
   assertEquals(suspends, 1)
   assertEquals(resumes, 0)

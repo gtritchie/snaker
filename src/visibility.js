@@ -10,6 +10,7 @@ export function createVisibilityGate(opts = {}) {
   const now = opts.now ?? (() => performance.now())
   const setTimeout = opts.setTimeout ?? globalThis.setTimeout
   const clearTimeout = opts.clearTimeout ?? globalThis.clearTimeout
+  const audioRef = opts.audioRef ?? (() => null)
 
   let hidden = (document.visibilityState === 'hidden')
   let hiddenSince = hidden ? now() : null
@@ -52,6 +53,8 @@ export function createVisibilityGate(opts = {}) {
       hidden = true
       hiddenSince = now()
       for (const s of [...active]) park(s)
+      const a = audioRef()
+      if (a) Promise.resolve(a.suspend()).catch(err => console.warn('audio: visibility suspend failed:', err))
     } else if (document.visibilityState !== 'hidden' && hidden) {
       hidden = false
       if (hiddenSince !== null) totalHiddenMs += now() - hiddenSince
@@ -60,9 +63,26 @@ export function createVisibilityGate(opts = {}) {
         parked.delete(s)
         start(s)
       }
+      const a = audioRef()
+      if (a) Promise.resolve(a.resume()).catch(err => console.warn('audio: visibility resume failed:', err))
     }
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
+
+  function destroy() {
+    if (destroyed) return
+    destroyed = true
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    for (const s of [...active]) {
+      clearTimeout(s.timerId)
+      s.reject(new VisibilityGateDestroyedError())
+    }
+    for (const s of [...parked]) {
+      s.reject(new VisibilityGateDestroyedError())
+    }
+    active.clear()
+    parked.clear()
+  }
 
   // Single now() snapshot — see spec Section 2 "Read tearing" (roborev #623).
   function visibleNow() {
@@ -72,5 +92,5 @@ export function createVisibilityGate(opts = {}) {
     return t - hiddenSoFar
   }
 
-  return { sleep, visibleNow }
+  return { sleep, visibleNow, destroy }
 }

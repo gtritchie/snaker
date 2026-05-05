@@ -1,5 +1,5 @@
-import { test, assertEquals } from './harness.js'
-import { createVisibilityGate } from '../src/visibility.js'
+import { test, assertEquals, assertTrue } from './harness.js'
+import { createVisibilityGate, VisibilityGateDestroyedError } from '../src/visibility.js'
 
 // Fake browser environment for deterministic timing tests.
 // - currentTime is mutated only by advance(); now() is a pure read of it.
@@ -171,4 +171,62 @@ test('sleep(100) on a gate constructed while hidden does not resolve until visib
   env.advance(1)
   await Promise.resolve()
   assertEquals(resolved, true, 'resolves at full 100 ms after becoming visible')
+})
+
+test('destroy() rejects in-flight sleeps with VisibilityGateDestroyedError', async () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  let err = null
+  g.sleep(1000).catch(e => { err = e })
+  g.destroy()
+  await Promise.resolve()
+  assertTrue(err instanceof VisibilityGateDestroyedError, 'expected VisibilityGateDestroyedError, got: ' + (err && err.name))
+})
+
+test('destroy() rejects parked sleeps too', async () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  let err = null
+  g.sleep(1000).catch(e => { err = e })
+  env.setVisibility('hidden')      // parks the sleep
+  g.destroy()
+  await Promise.resolve()
+  assertTrue(err instanceof VisibilityGateDestroyedError)
+})
+
+test('destroy() removes the visibilitychange listener', () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  assertEquals(env.listenerCount(), 1)
+  g.destroy()
+  assertEquals(env.listenerCount(), 0)
+})
+
+test('destroy() is idempotent', () => {
+  const env = makeFakeEnv()
+  const g = makeGate(env)
+  g.destroy()
+  g.destroy()                      // must not throw
+  assertEquals(env.listenerCount(), 0)
+})
+
+test('audio.suspend() called on hide, audio.resume() called on show', () => {
+  const env = makeFakeEnv()
+  let suspends = 0, resumes = 0
+  const audio = { suspend: () => { suspends++ }, resume: () => { resumes++ } }
+  const g = makeGate(env, { audioRef: () => audio })
+  env.setVisibility('hidden')
+  assertEquals(suspends, 1)
+  assertEquals(resumes, 0)
+  env.setVisibility('visible')
+  assertEquals(suspends, 1)
+  assertEquals(resumes, 1)
+})
+
+test('gate constructed while hidden does NOT call audio.suspend() at construction', () => {
+  const env = makeFakeEnv(true)
+  let suspends = 0
+  const audio = { suspend: () => { suspends++ }, resume: () => {} }
+  makeGate(env, { audioRef: () => audio })
+  assertEquals(suspends, 0, 'AudioContext may not exist yet at construction')
 })

@@ -629,7 +629,18 @@ Replace with:
   // but the gate only needs audio inside its visibilitychange handler — well after
   // both have been wired up. See spec Section 1, "Construction ordering wrinkle".
   const visibility = createVisibilityGate({ audioRef: () => audio })
-  audio = createAudio({ sleep: ms => visibility.sleep(ms) })
+  // Audio's pacing routes through the gate, but fire-and-forget audio.play()
+  // call sites (step beep, playAgainPrompt beeps, celebrateRun, crashHandler)
+  // would surface gate-destroy rejections as unhandled if audio.play()'s
+  // internal sleep simply rethrew them. Swallow VisibilityGateDestroyedError
+  // here so audio.play() resolves cleanly during shutdown. Awaited callers in
+  // game.js still get correct shutdown behavior via game.js's own sleep()
+  // wrapper (which does NOT swallow), routed through the runGame outer catch.
+  const audioSleep = ms => visibility.sleep(ms).catch(err => {
+    if (err instanceof VisibilityGateDestroyedError) return
+    throw err
+  })
+  audio = createAudio({ sleep: audioSleep })
   registerAudio(audio)
   const input = createInput(canvas, () => {
     audio.resume().catch(err => console.warn('audio: resume on gesture failed:', err))
@@ -940,7 +951,12 @@ test('Printable char with Ctrl held is NOT consumed and NOT preventDefaulted', (
   const input = createInput(canvas)
   let lastBuffer = ''
   input.lineInput({ render: (b) => { lastBuffer = b } })
-  const e = makeKeyEvent('a', { ctrlKey: true })
+  // Use 'c' rather than 'a' — 'a' is a movement key (left), so
+  // setKbKeyFromEvent runs first and preventDefaults BEFORE the line-input
+  // branch sees it. 'c' has no direction handling, so the only path that
+  // could call preventDefault is the printable branch — which the modifier
+  // check correctly skips.
+  const e = makeKeyEvent('c', { ctrlKey: true })
   fireKeyDown(canvas, e)
   assertEquals(lastBuffer, '', 'modifier means engine does not consume')
   assertEquals(e.wasPrevented(), false)
@@ -1032,7 +1048,8 @@ Reload tests.html. Expected: all rows green.
 2. Type `JOHN`. Press Backspace twice. Buffer shows `JO`. No browser back-navigation.
 3. Type `EY`. Press Enter. Saves as `JOEY`.
 4. From the title screen "PRESS ANY KEY TO RUN", press Space. Resolves the prompt. No page scroll.
-5. From the same prompt, press Tab. The browser default (focus the next element) still works — no preventDefault on unhandled keys.
+5. Reach a fresh "press any key" prompt. Press Tab. Expected: prompt resolves AND focus does NOT advance to the next element. ("Press ANY key" means any key — Tab included. The spec deliberately preventDefaults every key the engine consumes during `waitForKey`.)
+6. With the canvas NOT focused (click outside the canvas), press Space. Page should scroll normally — the engine isn't consuming, so no preventDefault. (Sanity-check that the gate is "only when consumed.")
 
 If you tweaked the tuning constants for testing, revert them before committing.
 

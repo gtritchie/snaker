@@ -1,5 +1,5 @@
-import { test, assertEquals, assertTrue } from './harness.js'
-import { createVisibilityGate, VisibilityGateDestroyedError } from '../src/visibility.js'
+import { test, assertEquals } from './harness.js'
+import { createVisibilityGate } from '../src/visibility.js'
 
 // Fake browser environment for deterministic timing tests.
 // - currentTime is mutated only by advance(); now() is a pure read of it.

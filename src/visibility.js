@@ -8,9 +8,6 @@ export class VisibilityGateDestroyedError extends Error {
 export function createVisibilityGate(opts = {}) {
   const document = opts.document ?? globalThis.document
   const now = opts.now ?? (() => performance.now())
-  const setTimeout = opts.setTimeout ?? globalThis.setTimeout
-  const clearTimeout = opts.clearTimeout ?? globalThis.clearTimeout
-  const audioRef = opts.audioRef ?? (() => null)
 
   let hidden = (document.visibilityState === 'hidden')
   let hiddenSince = hidden ? now() : null

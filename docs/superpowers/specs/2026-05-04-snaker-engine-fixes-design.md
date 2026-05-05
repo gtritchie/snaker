@@ -169,13 +169,16 @@ function park(sleeper) {
 
 ```js
 function visibleNow() {
+  const t = now()                              // single snapshot — see "Read tearing" below
   let hiddenSoFar = totalHiddenMs
-  if (hidden && hiddenSince !== null) hiddenSoFar += now() - hiddenSince
-  return now() - hiddenSoFar
+  if (hidden && hiddenSince !== null) hiddenSoFar += t - hiddenSince
+  return t - hiddenSoFar
 }
 ```
 
 **Correctness.** Monotonic non-decreasing: `now()` only grows, `hiddenSoFar` only grows, and `hiddenSoFar` grows at most as fast as `now()` (it grows at the same rate while hidden, doesn't grow at all while visible). Difference of two calls equals the wall-clock time between them minus any hidden interval that lies inside that window — correct for any pair of calls regardless of when each was made, including pairs that bracket multiple hidden intervals.
+
+**Read tearing.** The single `t = now()` snapshot is load-bearing. With two separate `now()` calls (one to compute `hiddenSoFar`, one for the return), the value advances by `(t2 - t1)` between them — violating "frozen while hidden" by microseconds in production and by arbitrary amounts under a fake clock that mutates between reads. Caught by roborev review #623.
 
 **Hidden time before gate creation is fine.** `totalHiddenMs` starts at 0 at gate construction. Pre-construction visibility events don't exist for the gate. Two `visibleNow()` calls made after construction subtract correctly; absolute values are not exposed to callers.
 

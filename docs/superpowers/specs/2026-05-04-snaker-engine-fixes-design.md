@@ -33,7 +33,7 @@ The engine was recently refactored to be embeddable (`boot(canvas, options?) →
 
 | Decision | Choice | Reason |
 | --- | --- | --- |
-| Pause granularity for `sleep()` | **Strict** — resume with remaining ms | Same invariant as `elapsedSince` ("hidden time doesn't count"); marginal cost over loose semantics |
+| Pause granularity for `sleep()` | **Strict** — resume with remaining ms | Same invariant as `visibleNow()` ("hidden time doesn't count"); marginal cost over loose semantics |
 | Test strategy | **Both** — fake-clock unit tests + manual recipe | Pause/resume bookkeeping is bug-prone and hard to verify by tabbing away; integration-level coverage from manual recipe |
 | Audio coupling | **Gate owns** `audio.suspend()` / `audio.resume()` | Visibility is wholly an engine concern; eliminates `main.js`'s handler entirely |
 | Behavior at `boot()` while already hidden | **Initialize hidden** — sleeps don't resolve, audio stays suspended, until first visible event | Same invariant from t=0; one-line implementation |
@@ -57,16 +57,27 @@ export function createVisibilityGate({ audio, document, now, setTimeout, clearTi
 | Method | Purpose |
 | --- | --- |
 | `sleep(ms) → Promise<void>` | Resolves after `ms` of *visible* time. Pauses mid-flight on hide; resumes with the remaining ms on show. |
-| `elapsedSince(t) → number` | Like `now() - t`, minus any portion of hidden time that fell after `t`. |
+| `visibleNow() → number` | Monotonic visible-time clock. Advances at wall rate when visible, frozen while hidden. Two calls subtract to give elapsed visible ms; absolute value has no meaning. |
 | `destroy() → void` | Removes the `visibilitychange` listener, clears all parked timers, rejects all in-flight sleeps with a sentinel error. Idempotent. |
 | `_debug() → object` | Exposes `{ hidden, parkedCount, totalHiddenMs }` for unit tests only. Underscore-prefixed so it's not a public API contract. |
+
+### Why `visibleNow()` instead of `elapsedSince(t)`
+
+A naive `elapsedSince(t) = now() - t - totalHiddenMs` is buggy when a hidden interval falls *between* gate creation and `t`: the hidden time before `t` is incorrectly subtracted, returning under-counts or negatives. Caught by roborev review #622.
+
+Two viable fixes:
+
+- **(a) Two-arg form:** `elapsedSince(t, hiddenBaseline)`, callers capture `const baseline = visibility.totalHidden()` alongside `t`. Correct, but spreads two synchronized values across each call site — easy to forget the baseline.
+- **(b) Monotonic visible-time clock:** `visibleNow()` returns `now() - hiddenSoFar`, where `hiddenSoFar` includes any in-progress hidden interval. Two calls subtract for elapsed visible time. No call-site baseline; the same one-call-and-subtract shape as today's `performance.now() - runStart`.
+
+**Plan:** **(b)**. Smaller surface, naturally composable, structurally impossible to misuse.
 
 **Wire-up in `runGame` (`src/game.js`):**
 
 1. After `const audio = createAudio(...)`, construct: `const visibility = createVisibilityGate({ audio })`.
 2. Replace `const sleep = (ms) => tracked(new Promise(r => setTimeout(r, ms)))` with `const sleep = (ms) => tracked(visibility.sleep(ms))`.
 3. Pass the gate's sleep into `createAudio` so internal pacing also gates: `createAudio({ sleep: ms => visibility.sleep(ms) })`. (See note in Section 2 about why this is constructed earlier.)
-4. In `playRounds`, change `accumulatedMs += performance.now() - runStart` to `accumulatedMs += visibility.elapsedSince(runStart)`. The `runStart` initialization (`const runStart = performance.now()`) is unchanged — `elapsedSince` interprets it as a `performance.now()`-style timestamp.
+4. In `playRounds`, replace both lines `const runStart = performance.now()` and `accumulatedMs += performance.now() - runStart` with `const runStart = visibility.visibleNow()` and `accumulatedMs += visibility.visibleNow() - runStart`. Same arithmetic shape; the clock just doesn't advance during hidden time.
 5. In the returned object, expose `visibility` (or just its `destroy`) so `main.js`'s `destroy()` can call `visibility.destroy()` during teardown.
 
 **Construction ordering wrinkle:** the gate needs `audio` (to suspend/resume on transitions), but `audio` needs `sleep` (which is the gate's). Two clean options:
@@ -154,19 +165,19 @@ function park(sleeper) {
 }
 ```
 
-### `elapsedSince(t)`
+### `visibleNow()`
 
 ```js
-function elapsedSince(t) {
-  // Precondition: t was captured after gate construction (asserted in dev via
-  // a comment at the call site; structurally guaranteed by playRounds).
-  let hiddenInWindow = totalHiddenMs
-  if (hidden && hiddenSince !== null) hiddenInWindow += now() - hiddenSince
-  return now() - t - hiddenInWindow
+function visibleNow() {
+  let hiddenSoFar = totalHiddenMs
+  if (hidden && hiddenSince !== null) hiddenSoFar += now() - hiddenSince
+  return now() - hiddenSoFar
 }
 ```
 
-**Correctness note.** The implementation subtracts *all* hidden time accumulated since gate creation, then offsets to "since `t`" via the `now() - t` term. This is correct iff `t ≥ gateCreationTime`. The only caller (`playRounds`'s `runStart`) is captured after `runGame` constructs the gate, so the precondition holds structurally. If a future caller violated it, `elapsedSince` would over-subtract; we'd add an assertion at that point. Not worth the complexity of per-interval tracking today — there's no realistic call pattern that would predate the gate.
+**Correctness.** Monotonic non-decreasing: `now()` only grows, `hiddenSoFar` only grows, and `hiddenSoFar` grows at most as fast as `now()` (it grows at the same rate while hidden, doesn't grow at all while visible). Difference of two calls equals the wall-clock time between them minus any hidden interval that lies inside that window — correct for any pair of calls regardless of when each was made, including pairs that bracket multiple hidden intervals.
+
+**Hidden time before gate creation is fine.** `totalHiddenMs` starts at 0 at gate construction. Pre-construction visibility events don't exist for the gate. Two `visibleNow()` calls made after construction subtract correctly; absolute values are not exposed to callers.
 
 ### Visibility transitions
 
@@ -246,14 +257,26 @@ Total elapsed wall time: 30070 ms. Total *visible* time the sleeper waited: 150 
 
 ### Sequence C: `playRounds` score timing during a hidden interval
 
-1. `runStart = performance.now() = 1000`.
+1. At wall t=1000, `runStart = visibility.visibleNow() = 1000` (no hidden time accumulated yet).
 2. Player plays for 5 s (visible) — snake advances normally.
-3. At wall t=6000, tab hides.
-4. Player tabs back at wall t=36000 (30 s later).
+3. At wall t=6000, tab hides. `hiddenSince = 6000`.
+4. Player tabs back at wall t=36000 (30 s later). `totalHiddenMs += 30000 = 30000`, `hiddenSince = null`.
 5. Player finishes the descent at wall t=40000.
-6. `accumulatedMs += visibility.elapsedSince(1000)`.
-   - `elapsedSince(1000) = now() - 1000 - totalHiddenMs = 40000 - 1000 - 30000 = 9000`.
-7. Score gets 9 s for this descent — exactly what was visibly played (5 s before hide + 4 s after show).
+6. `accumulatedMs += visibility.visibleNow() - runStart`.
+   - `visibility.visibleNow() = 40000 - 30000 = 10000`.
+   - Delta: `10000 - 1000 = 9000`.
+7. Score gets 9 s — exactly what was visibly played (5 s before hide + 4 s after show).
+
+### Sequence C2: hidden interval *before* `runStart` (the roborev case)
+
+1. Gate created at wall t=0. `totalHiddenMs = 0`.
+2. Tab hides at t=1000. Tab returns at t=10000. `totalHiddenMs = 9000`.
+3. At wall t=11000, `runStart = visibility.visibleNow() = 11000 - 9000 = 2000`.
+4. Player plays for 5 s (visible).
+5. At wall t=16000, `visibility.visibleNow() = 16000 - 9000 = 7000`.
+6. Delta: `7000 - 2000 = 5000` ✓ — exactly the visible 5 s, despite 9 s of hidden time before `runStart`.
+
+(The previous-spec `elapsedSince(11000)` returned `16000 - 11000 - 9000 = -4000` here. Bug fixed by construction.)
 
 ### Sequence D: awaited audio.play() spans a visibility transition
 
@@ -365,9 +388,10 @@ function makeFakeEnv(initiallyHidden = false) {
 1. `sleep(100)` resolves after the fake clock advances 100 ms with no visibility change.
 2. `sleep(100)` parked at t=80 resumes after `visible` fires at t=30000 and resolves at t=30020.
 3. Two concurrent `sleep(50)` and `sleep(150)` both park on hide at t=20, both resume on show at t=1000, resolve at t=1030 and t=1130 respectively.
-4. `elapsedSince(0)` returns 100 with no visibility change at t=100.
-5. `elapsedSince(1000)` after a 5-s visible run, 30-s hidden run, 4-s visible run returns 9000.
-6. `elapsedSince(t)` while currently hidden subtracts the in-progress hidden interval.
+4. `visibleNow()` advances at wall rate while visible: two calls 100 ms apart differ by 100.
+5. After a 5-s visible run, 30-s hidden run, 4-s visible run, the difference of `visibleNow()` between start and end is 9000.
+6. `visibleNow()` does NOT advance while hidden: the value is identical at hide-time and at any later moment before show.
+6b. **Roborev regression case:** gate created, hidden 1000–10000, `t1 = visibleNow()` at wall 11000, advance 5000 wall ms (visible), `t2 = visibleNow()`. Assert `t2 - t1 === 5000` (not negative).
 7. `boot()` while hidden: `sleep(100)` doesn't resolve until `visible` fires.
 8. `destroy()` rejects all in-flight sleeps with `VisibilityGateDestroyedError`.
 9. `destroy()` removes the `visibilitychange` listener (verify via fake document's listener set is empty).
@@ -501,7 +525,7 @@ If a direction key arrives during a `waitForKey()` (e.g. on the title screen):
 
 Per the original brief: two commits on this one branch.
 
-1. **"Pause game loop and play timing while tab is hidden"** — adds `src/visibility.js`, modifies `game.js` (sleep replacement, playRounds elapsedSince, audio wiring), modifies `audio.js` (sleep injection), removes visibility handler from `main.js`, adds `tests/visibility.test.js` (cases 1–11), registers it in `tests.html`.
+1. **"Pause game loop and play timing while tab is hidden"** — adds `src/visibility.js`, modifies `game.js` (sleep replacement, playRounds visible-time clock, audio wiring), modifies `audio.js` (sleep injection), removes visibility handler from `main.js`, adds `tests/visibility.test.js` (cases 1–11), registers it in `tests.html`.
 2. **"preventDefault on handled non-direction keys"** — modifies `src/input.js`, adds input tests (cases 12–19) — either appended to the visibility test file or in a new `tests/input.test.js`. **Plan:** new `tests/input.test.js` to keep file boundaries clean.
 
 ## Verification

@@ -230,3 +230,31 @@ test('gate constructed while hidden does NOT call audio.suspend() at constructio
   makeGate(env, { audioRef: () => audio })
   assertEquals(suspends, 0, 'AudioContext may not exist yet at construction')
 })
+
+test('onVisibilityChange snapshots time once (regression for roborev #629)', async () => {
+  const env = makeFakeEnv()
+  // Drifty now mirrors real performance.now: each read sees a slightly later value.
+  const driftyNow = () => { const t = env.now(); env.advance(1); return t }
+  const g = createVisibilityGate({
+    document: env.documentRef,
+    now: driftyNow,
+    setTimeout: env.setTimeout,
+    clearTimeout: env.clearTimeout,
+  })
+  let r1 = false, r2 = false, r3 = false
+  g.sleep(100).then(() => { r1 = true })
+  g.sleep(100).then(() => { r2 = true })
+  g.sleep(100).then(() => { r3 = true })
+  env.advance(50)
+  env.setVisibility('hidden')
+  env.advance(10000)
+  env.setVisibility('visible')
+  env.advance(200)
+  await Promise.resolve()
+  // All three sleepers must resolve. The point of the test is that the gate
+  // doesn't malfunction (e.g., negative remaining clamped to 0 because of
+  // accumulated drift) when now() advances per-call.
+  assertEquals(r1, true)
+  assertEquals(r2, true)
+  assertEquals(r3, true)
+})

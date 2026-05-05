@@ -20,8 +20,8 @@ export function createVisibilityGate(opts = {}) {
   const active = new Set()
   let destroyed = false
 
-  function start(sleeper) {
-    sleeper.startedAt = now()
+  function start(sleeper, t = now()) {
+    sleeper.startedAt = t
     active.add(sleeper)
     sleeper.timerId = setTimeout(() => {
       active.delete(sleeper)
@@ -30,10 +30,10 @@ export function createVisibilityGate(opts = {}) {
     }, sleeper.remaining)
   }
 
-  function park(sleeper) {
+  function park(sleeper, t = now()) {
     clearTimeout(sleeper.timerId)
     sleeper.timerId = null
-    sleeper.remaining -= (now() - sleeper.startedAt)
+    sleeper.remaining -= (t - sleeper.startedAt)
     if (sleeper.remaining < 0) sleeper.remaining = 0
     active.delete(sleeper)
     parked.add(sleeper)
@@ -49,19 +49,20 @@ export function createVisibilityGate(opts = {}) {
   }
 
   function onVisibilityChange() {
+    const t = now()
     if (document.visibilityState === 'hidden' && !hidden) {
       hidden = true
-      hiddenSince = now()
-      for (const s of [...active]) park(s)
+      hiddenSince = t
+      for (const s of [...active]) park(s, t)
       const a = audioRef()
       if (a) Promise.resolve(a.suspend()).catch(err => console.warn('audio: visibility suspend failed:', err))
     } else if (document.visibilityState !== 'hidden' && hidden) {
       hidden = false
-      if (hiddenSince !== null) totalHiddenMs += now() - hiddenSince
+      if (hiddenSince !== null) totalHiddenMs += t - hiddenSince
       hiddenSince = null
       for (const s of [...parked]) {
         parked.delete(s)
-        start(s)
+        start(s, t)
       }
       const a = audioRef()
       if (a) Promise.resolve(a.resume()).catch(err => console.warn('audio: visibility resume failed:', err))

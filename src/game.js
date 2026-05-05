@@ -64,7 +64,12 @@ export function runGame(canvas, registerAudio = () => {}) {
   const screen = createScreen(canvas)
   const audio = createAudio()
   registerAudio(audio)
-  const input = createInput(canvas)
+  // Wire user gestures into audio.resume so the context unlocks during the
+  // gesture's event handler — Chrome mobile and iOS Safari don't always honor
+  // resume() called from a later microtask.
+  const input = createInput(canvas, () => {
+    audio.resume().catch(err => console.warn('audio: resume on gesture failed:', err))
+  })
 
   const abortRejecters = new Set()
 
@@ -447,15 +452,9 @@ async function titleScreen(ctx) {
   screen.printAt(360, 'ABORT GAME: ESC')
   screen.printAt(417, 'TOUCH SCREEN: VIRTUAL JOYSTICK')
   await tracked(input.waitForKey())
-  // Fire-and-forget the resume: on Chrome mobile and iOS Safari, when the
-  // autoplay policy blocks an AudioContext.resume() call, the returned promise
-  // can hang indefinitely (neither resolves nor rejects), which would freeze
-  // the gameplay flow. The unlock side effect happens regardless of whether we
-  // await the promise; .catch() prevents an unhandled-rejection warning if the
-  // browser does choose to reject.
-  audio.resume().catch(err => {
-    console.warn('audio: resume blocked, continuing muted:', err)
-  })
+  // Audio unlock is handled by createInput's onUserGesture callback (wired in
+  // runGame), which calls audio.resume() synchronously inside the touch/click/
+  // key handler — that placement is what Chrome mobile and iOS Safari require.
 
   // Title screen artwork — mirrors snaker.bas line 40:
   //   CLS RND(4)+1
@@ -483,10 +482,6 @@ async function setup(ctx) {
   // with stepped tones. We await each play() so the visual pacing matches the audio
   // (the original BASIC's PLAY blocks). Without awaiting, fire-and-forget plays
   // queue many seconds of audio behind a sub-second visual loop.
-  // Fire-and-forget the resume — see titleScreen for why we don't await.
-  audio.resume().catch(err => {
-    console.warn('audio: resume blocked, continuing muted:', err)
-  })
   screen.cls(0)
   for (let p = 1024; p <= 1504; p += 32) {
     screen.poke(p, 175)

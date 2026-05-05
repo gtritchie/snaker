@@ -231,8 +231,17 @@ test('gate constructed while hidden does NOT call audio.suspend() at constructio
   assertEquals(suspends, 0, 'AudioContext may not exist yet at construction')
 })
 
-test('onVisibilityChange snapshots time once (regression for roborev #629)', async () => {
+test('gate behaves under a drifty now() (smoke for roborev #629 fix)', async () => {
   const env = makeFakeEnv()
+  // The structural fix for roborev #629 is the function signatures:
+  // start(sleeper, t = now()) and park(sleeper, t = now()) make
+  // "snapshot once at the transition and pass it through" the only ergonomic
+  // path. This test exercises the drifty-clock path — three concurrent
+  // sleeps surviving a hide/show cycle when each now() read advances the
+  // clock. It is path coverage, not regression detection: precise timing
+  // assertions would couple to implementation details. The real guard is
+  // code review on the start/park signatures.
+  //
   // Drifty now mirrors real performance.now: each read sees a slightly later value.
   const driftyNow = () => { const t = env.now(); env.advance(1); return t }
   const g = createVisibilityGate({

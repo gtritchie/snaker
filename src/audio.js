@@ -171,7 +171,8 @@ function resolveLengthAndDots(event, runningLength, runningDots) {
   return { useLength, useDots }
 }
 
-export function createAudio() {
+export function createAudio(opts = {}) {
+  const sleep = opts.sleep ?? ((ms) => new Promise(r => setTimeout(r, ms)))
   let ac = null
   let masterGain = null
   let queueTime = 0
@@ -361,7 +362,7 @@ export function createAudio() {
     }
 
     if (elapsedSec <= 0) return
-    await new Promise(resolve => setTimeout(resolve, elapsedSec * 1000))
+    await sleep(elapsedSec * 1000)
   }
 
   return { play, resume, suspend, flush }

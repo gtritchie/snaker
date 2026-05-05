@@ -51,19 +51,6 @@ export function boot(canvas, options = {}) {
   })
   ro.observe(container)
 
-  // Pause audio when the tab is hidden; resume when visible. Without this,
-  // a backgrounded game keeps stepping (via setTimeout) and audio continues —
-  // both undesirable.
-  const onVisibility = () => {
-    const promise = document.visibilityState === 'hidden'
-      ? game.audio.suspend()
-      : game.audio.resume()
-    // audio.suspend()/resume() return undefined when the AudioContext doesn't
-    // exist yet (no user interaction). Wrap so .catch() doesn't TypeError.
-    Promise.resolve(promise).catch(err => console.warn('audio: visibility toggle failed:', err))
-  }
-  document.addEventListener('visibilitychange', onVisibility)
-
   game.promise.catch(err => {
     console.error('snaker crashed:', err)
     renderCrashOverlay(canvas, err)
@@ -75,7 +62,6 @@ export function boot(canvas, options = {}) {
     destroyed = true
 
     ro.disconnect()
-    document.removeEventListener('visibilitychange', onVisibility)
     canvas.removeEventListener('mousedown', onMouseDown)
     game.escUnsub()
     game.input.destroy()
@@ -84,6 +70,7 @@ export function boot(canvas, options = {}) {
     // created (e.g. destroy() called before the user ever pressed a key).
     Promise.resolve(game.audio.suspend()).catch(err => console.warn('audio: suspend on destroy failed:', err))
     game.setDestroyed()
+    game.visibility.destroy()
     game.fireAbort()
 
     canvas.style.imageRendering = priorStyles.imageRendering

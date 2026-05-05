@@ -22,7 +22,7 @@ function computeSpeed(up, down) {
   return SPEED_NORMAL
 }
 
-export function createInput(canvas) {
+export function createInput(canvas, onUserGesture = () => {}) {
   // Keyboard and touch direction state are tracked independently so that ending
   // a touch does not clobber a held keyboard direction (and vice versa).
   const kbKeys = { left: false, right: false, up: false, down: false }
@@ -31,6 +31,19 @@ export function createInput(canvas) {
   const keyListeners = []
   let lineInputState = null
   const escListeners = new Set()
+
+  // Fire on every user-input event. Used by callers (audio) that need to do
+  // work — like AudioContext.resume() — synchronously inside the gesture
+  // handler so the autoplay policy accepts it. Only called from handlers tied
+  // to events the WHATWG spec lists as "activation triggering input events":
+  // keydown, mousedown, touchend (notably NOT touchstart), and similar.
+  function fireUserGesture() {
+    try {
+      onUserGesture()
+    } catch (err) {
+      console.warn('input: onUserGesture handler threw:', err)
+    }
+  }
 
   function setKbKeyFromEvent(e, down) {
     const k = e.key
@@ -44,6 +57,7 @@ export function createInput(canvas) {
   }
 
   function onKeyDown(e) {
+    fireUserGesture()
     if (e.key === 'Escape') {
       e.preventDefault()
       // Clear any orphaned waitForKey listeners so a future keydown can't fire
@@ -111,6 +125,10 @@ export function createInput(canvas) {
   let touchPos = null
 
   function onTouchStart(e) {
+    // NOTE: touchstart is NOT in the WHATWG list of activation-triggering input
+    // events; touchend is. Calling fireUserGesture() here would fail the
+    // autoplay policy on first tap. We resolve waitForKey on touchstart for
+    // responsive feel, but defer the audio unlock to onTouchEnd.
     if (e.touches.length === 0) return
     const t = e.touches[0]
     const rect = canvas.getBoundingClientRect()
@@ -135,6 +153,10 @@ export function createInput(canvas) {
   }
 
   function onTouchEnd(e) {
+    // touchend IS an activation-triggering input event per WHATWG, so this is
+    // the canonical place to fire the user-gesture callback so audio.resume()
+    // succeeds against the autoplay policy.
+    fireUserGesture()
     touchActive = false
     touchCenter = null
     touchPos = null
@@ -160,8 +182,33 @@ export function createInput(canvas) {
     canvas.addEventListener('touchcancel', onTouchEnd,  { passive: false })
   }
 
-  window.addEventListener('keydown', onKeyDown)
-  window.addEventListener('keyup', onKeyUp)
+  // Resolve any pending waitForKey on canvas mousedown — mirrors the same
+  // path in onTouchStart so a single click/tap advances "press any key"
+  // prompts. Without this, desktop users had to click (for focus) AND then
+  // press a key, and Chrome DevTools mobile emulation swallowed the first
+  // tap (it fires mousedown but no touchstart on the first interaction).
+  // Skipped while a lineInput buffer is collecting characters — pointer
+  // input shouldn't accidentally submit the player's name.
+  function onMouseWake() {
+    fireUserGesture()
+    if (lineInputState === null && keyListeners.length > 0) {
+      const resolvers = keyListeners.splice(0)
+      for (const r of resolvers) r(' ')
+    }
+  }
+  canvas.addEventListener('mousedown', onMouseWake)
+
+  canvas.addEventListener('keydown', onKeyDown)
+  canvas.addEventListener('keyup', onKeyUp)
+
+  // When the canvas loses focus while a direction key is held, the matching
+  // keyup goes to the new focus target instead of the canvas — leaving
+  // kbKeys with a stuck `true`. Clear keyboard direction state on blur so
+  // the next focus starts from a clean slate.
+  const onBlur = () => {
+    kbKeys.left = kbKeys.right = kbKeys.up = kbKeys.down = false
+  }
+  canvas.addEventListener('blur', onBlur)
 
   function getX() {
     return computeX(kbKeys.left || tcKeys.left, kbKeys.right || tcKeys.right)
@@ -198,8 +245,10 @@ export function createInput(canvas) {
   }
 
   function destroy() {
-    window.removeEventListener('keydown', onKeyDown)
-    window.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('keydown', onKeyDown)
+    canvas.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('mousedown', onMouseWake)
+    canvas.removeEventListener('blur', onBlur)
     if (isTouchDevice) {
       canvas.removeEventListener('touchstart', onTouchStart)
       canvas.removeEventListener('touchmove', onTouchMove)

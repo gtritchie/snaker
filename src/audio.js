@@ -244,6 +244,25 @@ export function createAudio() {
     queueTime = ac.currentTime
   }
 
+  // Wait briefly for the AudioContext to transition into 'running'. Used by
+  // play() to bridge the few-millisecond gap between ac.resume() being called
+  // (after a user gesture) and the autoplay-policy unlock actually completing.
+  // Resolves immediately if ac is already running. Times out after 1 s so we
+  // can't hang if the page never gets a user gesture.
+  function waitForRunning() {
+    if (!ac || ac.state === 'running') return Promise.resolve()
+    return new Promise(resolve => {
+      const cleanup = () => {
+        ac.removeEventListener('statechange', onChange)
+        clearTimeout(timer)
+        resolve()
+      }
+      const onChange = () => { if (ac.state === 'running') cleanup() }
+      ac.addEventListener('statechange', onChange)
+      const timer = setTimeout(cleanup, 1000)
+    })
+  }
+
   function scheduleTone(freq, durationSec, gain) {
     const osc = ac.createOscillator()
     osc.type = 'square'
@@ -261,18 +280,42 @@ export function createAudio() {
     osc.onended = () => activeNodes.delete(osc)
   }
 
-  function play(playString) {
+  async function play(playString) {
     // State events (tempo, octave, length, volume) are applied even while suspended
     // or audio-disabled so cross-call PLAY state stays consistent. Note/rest events
-    // are skipped in those cases — no oscillators are scheduled and queueTime is
-    // not advanced — so a hidden tab cannot queue a burst that fires on resume,
-    // and a missing AudioContext does not crash the game.
+    // are skipped in those cases — no oscillators are scheduled — so a hidden tab
+    // cannot queue a burst that fires on resume, and a missing AudioContext does
+    // not crash the game. The wallclock setTimeout below paces awaited play()
+    // calls for the full musical duration even when scheduling is skipped, so
+    // visual sequencing (title music, win sequence) stays correct under silence.
     if (!suspended) ensureContext()
-    if (ac && queueTime < ac.currentTime) queueTime = ac.currentTime
+
+    // If the context is mid-transition (suspended → running) after a recent
+    // ac.resume(), wait briefly for it. Without this the very first play() call
+    // after the autoplay-unlock tap would schedule oscillators on a still-
+    // suspended context, with start times that elapse before the context
+    // unlocks — producing silent output.
+    if (ac && ac.state !== 'running') await waitForRunning()
+
+    // Resync queueTime with ac.currentTime when the context is running. We do
+    // this in BOTH directions: if queueTime fell behind currentTime (gap since
+    // the last play), we catch up; if it's ahead (e.g. a previous skipped play
+    // would have advanced queueTime past currentTime, but we no longer do that),
+    // we don't reschedule the past. queueTime is only mutated when scheduling.
+    if (ac && ac.state === 'running' && queueTime < ac.currentTime) {
+      queueTime = ac.currentTime
+    }
 
     const events = parsePlayString(playString)
-    const start = queueTime
-    const skipScheduling = suspended || audioDisabled
+    const skipScheduling = suspended || audioDisabled || !ac || ac.state !== 'running'
+
+    // Wallclock duration is tracked separately from queueTime so awaited play()
+    // calls pace correctly under skipped scheduling without poisoning the
+    // future audio schedule with a queueTime that ran ahead of ac.currentTime
+    // (ac.currentTime doesn't advance while suspended, so a queueTime that
+    // accumulated during a silent play would schedule subsequent tones N
+    // seconds in the future after the context resumes).
+    let elapsedSec = 0
 
     for (const e of events) {
       if (e.type === 'tempo') { runningTempo = applyStateOp(runningTempo, e); continue }
@@ -284,36 +327,41 @@ export function createAudio() {
       }
       if (e.type === 'volume') { runningVolume = applyStateOp(runningVolume, e); continue }
 
-      if (skipScheduling) continue
-
       // Narrow catch around the Web Audio surface only: a scheduling failure for
       // one event must not abort the rest of the PLAY string, and must not be
       // confused with a parser/state-update bug, which propagates instead.
       try {
         if (e.type === 'rest') {
           const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
-          queueTime += eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
+          const dur = eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
+          if (!skipScheduling) queueTime += dur
+          elapsedSec += dur
         } else if (e.type === 'note') {
           const { useLength, useDots } = resolveLengthAndDots(e, runningLength, runningLengthDots)
           const dur = eventDurationSec(useLength, dotMultiplier(useDots), runningTempo)
-          const freq = noteFrequency(e.name, e.accidental, runningOctave)
-          scheduleTone(freq, dur, volumeToGain(runningVolume))
-          queueTime += dur
+          if (!skipScheduling) {
+            const freq = noteFrequency(e.name, e.accidental, runningOctave)
+            scheduleTone(freq, dur, volumeToGain(runningVolume))
+            queueTime += dur
+          }
+          elapsedSec += dur
         } else if (e.type === 'noteNumber') {
           const dotMul = dotMultiplier(runningLengthDots)
           const dur = eventDurationSec(runningLength, dotMul, runningTempo)
-          const freq = noteNumberFrequency(e.number, runningOctave)
-          scheduleTone(freq, dur, volumeToGain(runningVolume))
-          queueTime += dur
+          if (!skipScheduling) {
+            const freq = noteNumberFrequency(e.number, runningOctave)
+            scheduleTone(freq, dur, volumeToGain(runningVolume))
+            queueTime += dur
+          }
+          elapsedSec += dur
         }
       } catch (err) {
         console.error('audio.play: scheduling failed', { playString, event: e, err })
       }
     }
 
-    if (skipScheduling) return Promise.resolve()
-    const totalSec = queueTime - start
-    return new Promise(resolve => setTimeout(resolve, totalSec * 1000))
+    if (elapsedSec <= 0) return
+    await new Promise(resolve => setTimeout(resolve, elapsedSec * 1000))
   }
 
   return { play, resume, suspend, flush }

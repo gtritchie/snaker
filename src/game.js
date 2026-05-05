@@ -41,28 +41,50 @@ class GameAbortedError extends Error {
   constructor() { super('game aborted'); this.name = 'GameAbortedError' }
 }
 
-const abortRejecters = new Set()
+// Original Bublitchki melody — copied verbatim from snaker.bas line 50.
+const TITLE_MUSIC = "T4 O3 V25 L8 D G A L4 B L8 A G P8 O4 D C# C O3 L4 B L8 A G P8 D G B O4 L4 D L8 C# L4 D O3 L8 B A G L4... B L8 B O4 E D# L4 E O3 L8 B L4 O4 C L8 O3 B O4 D C L4 O3 B L8 A L4 G L8 B O4 D C O3 B P8 A L4 B L8 A G F# E P8 B P4 O4 E"
 
-function fireAbort() {
-  const list = [...abortRejecters]
-  abortRejecters.clear()
-  for (const r of list) {
-    try {
-      r()
-    } catch (err) {
-      // A rejecter throwing means a tracked() promise is in an inconsistent state;
-      // swallow so one bad rejecter can't prevent others from firing, but log so
-      // the underlying bug isn't invisible.
-      console.warn('fireAbort: rejecter threw:', err)
-    }
-  }
+const rnd = n => Math.floor(Math.random() * n) + 1
+
+const NATIVE_W = 256
+const NATIVE_H = 192
+
+export function computeScale(container, useWidthOnly) {
+  const w = container.clientWidth
+  const widthScale = Math.max(1, Math.floor(w / NATIVE_W))
+  if (useWidthOnly) return widthScale
+
+  const h = container.clientHeight
+  if (h === 0) return widthScale   // safety net for runtime layout collapse
+  const heightScale = Math.max(1, Math.floor(h / NATIVE_H))
+  return Math.min(widthScale, heightScale)
 }
 
-// Wrap a promise so that fireAbort() rejects it with GameAbortedError. The
-// underlying promise is left to settle on its own; if it resolves after the
-// wrapper has already rejected, the resolution is ignored.
-function tracked(promise) {
-  return new Promise((resolve, reject) => {
+export function runGame(canvas, registerAudio = () => {}) {
+  const screen = createScreen(canvas)
+  const audio = createAudio()
+  registerAudio(audio)
+  // Wire user gestures into audio.resume so the context unlocks during the
+  // gesture's event handler — Chrome mobile and iOS Safari don't always honor
+  // resume() called from a later microtask.
+  const input = createInput(canvas, () => {
+    audio.resume().catch(err => console.warn('audio: resume on gesture failed:', err))
+  })
+
+  const abortRejecters = new Set()
+
+  const fireAbort = () => {
+    const list = [...abortRejecters]
+    abortRejecters.clear()
+    for (const r of list) {
+      try { r() } catch (err) { console.warn('fireAbort: rejecter threw:', err) }
+    }
+  }
+
+  // Wrap a promise so that fireAbort() rejects it with GameAbortedError. The
+  // underlying promise is left to settle on its own; if it resolves after the
+  // wrapper has already rejected, the resolution is ignored.
+  const tracked = (promise) => new Promise((resolve, reject) => {
     let settled = false
     const rejecter = () => {
       if (settled) return
@@ -85,72 +107,58 @@ function tracked(promise) {
       },
     )
   })
-}
 
-const sleep = ms => tracked(new Promise(r => setTimeout(r, ms)))
+  const sleep = (ms) => tracked(new Promise(r => setTimeout(r, ms)))
 
-// Original Bublitchki melody — copied verbatim from snaker.bas line 50.
-const TITLE_MUSIC = "T4 O3 V25 L8 D G A L4 B L8 A G P8 O4 D C# C O3 L4 B L8 A G P8 D G B O4 L4 D L8 C# L4 D O3 L8 B A G L4... B L8 B O4 E D# L4 E O3 L8 B L4 O4 C L8 O3 B O4 D C L4 O3 B L8 A L4 G L8 B O4 D C O3 B P8 A L4 B L8 A G F# E P8 B P4 O4 E"
+  const ctx = { screen, audio, input, tracked, sleep }
 
-const rnd = n => Math.floor(Math.random() * n) + 1
-
-const NATIVE_W = 256
-const NATIVE_H = 192
-
-function pickInitialScale(screen) {
-  const maxW = Math.floor(window.innerWidth / NATIVE_W)
-  const maxH = Math.floor(window.innerHeight / NATIVE_H)
-  const scale = Math.max(1, Math.min(maxW, maxH))
-  screen.setScale(scale)
-}
-
-export async function runGame(canvas, registerAudio = () => {}) {
-  const screen = createScreen(canvas)
-  const audio = createAudio()
-  registerAudio(audio)
-  const input = createInput(canvas)
-  pickInitialScale(screen)
-
-  window.addEventListener('resize', () => pickInitialScale(screen))
+  let destroyed = false
+  const setDestroyed = () => { destroyed = true }
 
   // ESC during play aborts whatever's awaiting and returns to the pre-title.
-  input.onEscape(() => {
+  const escUnsub = input.onEscape(() => {
     audio.flush()
     fireAbort()
   })
 
-  while (true) {
-    try {
-      await runMainFlow(screen, audio, input)
-      return   // user chose N to quit
-    } catch (err) {
-      if (err instanceof GameAbortedError) {
-        // Reset transient screen state — crashHandler may have aborted between
-        // setInverted(true) and setInverted(false), leaving the playfield flipped.
-        screen.setInverted(false)
-        continue   // ESC pressed; restart from the pre-title
+  const promise = (async () => {
+    while (!destroyed) {
+      try {
+        await runMainFlow(ctx)
+        return   // user chose N to quit
+      } catch (err) {
+        if (err instanceof GameAbortedError) {
+          if (destroyed) return
+          // Reset transient screen state — crashHandler may have aborted between
+          // setInverted(true) and setInverted(false), leaving the playfield flipped.
+          screen.setInverted(false)
+          continue   // ESC pressed; restart from the pre-title
+        }
+        throw err
       }
-      throw err
     }
-  }
+  })()
+
+  return { promise, screen, audio, input, fireAbort, escUnsub, setDestroyed }
 }
 
-async function runMainFlow(screen, audio, input) {
-  await titleScreen(screen, audio, input)
+async function runMainFlow(ctx) {
+  const { screen } = ctx
+  await titleScreen(ctx)
 
   let bestTicks = (loadBestScore()?.ticks) ?? Infinity
 
   while (true) {
-    await setup(screen, audio)
-    const elapsed = await playRounds(screen, audio, input)
-    await winSequence(screen, audio)
-    const displayTime = await showScore(screen, audio, elapsed)
+    await setup(ctx)
+    const elapsed = await playRounds(ctx)
+    await winSequence(ctx)
+    const displayTime = await showScore(ctx, elapsed)
     if (elapsed < bestTicks) {
       bestTicks = elapsed
-      await captureNewBestScore(screen, input, elapsed, displayTime)
+      await captureNewBestScore(ctx, elapsed, displayTime)
     }
-    await showBestScore(screen, audio)
-    if (!(await playAgainPrompt(screen, audio, input))) {
+    await showBestScore(ctx)
+    if (!(await playAgainPrompt(ctx))) {
       // BASIC line 720: print final best score and end.
       const best = loadBestScore()
       screen.cls(0)
@@ -174,7 +182,8 @@ const WIN_PHRASES = [
 ]
 const ARPEGGIO = "T255 O1 E F G B C A E D A G F C E D C B G E A D D A B C G E A D G C A E F E B C E D G A E D B C D E D G B C E D C"
 
-async function winSequence(screen, audio) {
+async function winSequence(ctx) {
+  const { screen, audio, tracked } = ctx
   // Drain any tail of the final fire-and-forget step beep so the awaited
   // win phrases line up wallclock-time with audio-time.
   audio.flush()
@@ -186,7 +195,8 @@ async function winSequence(screen, audio) {
   await tracked(audio.play("V15"))
 }
 
-async function showScore(screen, audio, elapsed) {
+async function showScore(ctx, elapsed) {
+  const { screen, audio, tracked, sleep } = ctx
   // BASIC line 510: CLS RND(4)+1; PRINT@168,"YOU MADE IT IN:"
   screen.cls(rnd(4) + 1)
   screen.printAt(168, 'YOU MADE IT IN:')
@@ -208,7 +218,8 @@ async function showScore(screen, audio, elapsed) {
   return timeStr
 }
 
-async function captureNewBestScore(screen, input, elapsed, displayTime) {
+async function captureNewBestScore(ctx, elapsed, displayTime) {
+  const { screen, input, tracked } = ctx
   // BASIC line 790: PRINT"WHAT IS YOUR NAME";:LINE INPUT">>>>?";N$
   // The trailing semicolon on PRINT suppresses the carriage return, so ">>>>?" and
   // the user's input continue on the same row right after the prompt.
@@ -235,7 +246,8 @@ async function captureNewBestScore(screen, input, elapsed, displayTime) {
   saveBestScore({ name: name.toUpperCase(), ticks: elapsed, displayTime })
 }
 
-async function showBestScore(screen, audio) {
+async function showBestScore(ctx) {
+  const { screen, audio, tracked, sleep } = ctx
   const best = loadBestScore()
   if (!best) return
   // BASIC lines 620-660.
@@ -256,7 +268,8 @@ async function showBestScore(screen, audio) {
   await sleep(3913)  // BASIC line 660: FOR PP=1 TO 1800 at slow speed (460 iter/sec)
 }
 
-async function playAgainPrompt(screen, audio, input) {
+async function playAgainPrompt(ctx) {
+  const { screen, audio, input, tracked } = ctx
   // BASIC lines 700-730.
   audio.flush()
   audio.play("V15 O3 N5")
@@ -281,21 +294,20 @@ const SNAKE_CODES = [148, 164, 180, 196, 212, 228, 244]
 // Returns total elapsed ticks (60 Hz) once the player completes 3 successful descents.
 // Only the active-play time of each descent is counted — inter-run celebration delays
 // are excluded, mirroring the original's TIMER=HT save/restore on lines 380-400.
-async function playRounds(screen, audio, input) {
+async function playRounds(ctx) {
   let leftEdge = 1025, rightEdge = 1054, playerPos = 1039
   let runs = 0
   let accumulatedMs = 0
 
   while (true) {
     const runStart = performance.now()
-    await singleDescent(screen, audio, input,
-      { leftEdge, rightEdge, playerPos })
+    await singleDescent(ctx, { leftEdge, rightEdge, playerPos })
     accumulatedMs += performance.now() - runStart
     leftEdge = 1025; rightEdge = 1054; playerPos = 1039
 
     runs += 1
     if (runs >= REQUIRED_DESCENTS) return msToTicks(accumulatedMs)
-    await celebrateRun(screen, audio)   // not counted toward score
+    await celebrateRun(ctx)   // not counted toward score
   }
 }
 
@@ -306,7 +318,8 @@ function msToTicks(ms) {
 // Runs one row-by-row descent. Crashes back the snake up one row in place
 // (matches the original's GOTO 130 from the crash handler) and returns only
 // when the snake reaches the bottom row.
-async function singleDescent(screen, audio, input, init) {
+async function singleDescent(ctx, init) {
+  const { screen, audio, input, sleep } = ctx
   let { leftEdge, rightEdge, playerPos } = init
 
   while (true) {
@@ -324,7 +337,7 @@ async function singleDescent(screen, audio, input, init) {
         else if (playerPos > rightEdge) playerPos = rightEdge
 
         if (COLLISION_DETECTION && screen.peek(playerPos) !== 96) {
-          ;({ leftEdge, rightEdge, playerPos } = await crashHandler(screen, audio,
+          ;({ leftEdge, rightEdge, playerPos } = await crashHandler(ctx,
             { leftEdge, rightEdge, playerPos }))
           crashed = true
           break
@@ -372,7 +385,8 @@ async function singleDescent(screen, audio, input, init) {
   }
 }
 
-async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
+async function crashHandler(ctx, { leftEdge, rightEdge, playerPos }) {
+  const { screen, audio, sleep } = ctx
   // BASIC lines 320-350.
   leftEdge -= 32
   rightEdge -= 32
@@ -406,7 +420,8 @@ async function crashHandler(screen, audio, { leftEdge, rightEdge, playerPos }) {
   return { leftEdge, rightEdge, playerPos }
 }
 
-async function celebrateRun(screen, audio) {
+async function celebrateRun(ctx) {
+  const { screen, audio, sleep } = ctx
   // BASIC lines 390-400: 15 quick beeps with the same POKE 1504,175 + PRINT@511
   // pattern as the descent loop. The PRINT@511 scrolls the screen up each
   // iteration, so the playfield is wiped clean by the end of the celebration
@@ -424,7 +439,8 @@ async function celebrateRun(screen, audio) {
   screen.poke(1535, 175)
 }
 
-async function titleScreen(screen, audio, input) {
+async function titleScreen(ctx) {
+  const { screen, audio, input, tracked } = ctx
   // Pre-title gateway. Browsers block audio autoplay until the user has interacted
   // with the page, so we show a plain "RUN" prompt first and use that key press
   // to resume the AudioContext. Styled to match the CoCo BASIC command-line look:
@@ -436,9 +452,9 @@ async function titleScreen(screen, audio, input) {
   screen.printAt(360, 'ABORT GAME: ESC')
   screen.printAt(417, 'TOUCH SCREEN: VIRTUAL JOYSTICK')
   await tracked(input.waitForKey())
-  await audio.resume().catch(err => {
-    console.warn('audio: resume blocked, continuing muted:', err)
-  })
+  // Audio unlock is handled by createInput's onUserGesture callback (wired in
+  // runGame), which calls audio.resume() synchronously inside the touch/click/
+  // key handler — that placement is what Chrome mobile and iOS Safari require.
 
   // Title screen artwork — mirrors snaker.bas line 40:
   //   CLS RND(4)+1
@@ -460,14 +476,12 @@ async function titleScreen(screen, audio, input) {
   await tracked(input.waitForKey())
 }
 
-async function setup(screen, audio) {
+async function setup(ctx) {
+  const { screen, audio, tracked } = ctx
   // Lines 90-100 of snaker.bas: CLS, then draw left and right walls one row at a time
   // with stepped tones. We await each play() so the visual pacing matches the audio
   // (the original BASIC's PLAY blocks). Without awaiting, fire-and-forget plays
   // queue many seconds of audio behind a sub-second visual loop.
-  await audio.resume().catch(err => {
-    console.warn('audio: resume blocked, continuing muted:', err)
-  })
   screen.cls(0)
   for (let p = 1024; p <= 1504; p += 32) {
     screen.poke(p, 175)

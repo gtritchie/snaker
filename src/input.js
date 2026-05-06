@@ -165,7 +165,8 @@ export function createInput(canvas, onUserGesture = () => {}) {
     e.preventDefault()
     if (lineInputState === null && keyListeners.length > 0) {
       const resolvers = keyListeners.splice(0)
-      for (const r of resolvers) r(' ')
+      const key = touchCenter.x < rect.width / 2 ? 'y' : 'n'
+      for (const r of resolvers) r(key)
     }
     updateTouchKeys()
   }

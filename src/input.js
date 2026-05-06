@@ -32,6 +32,25 @@ export function createInput(canvas, onUserGesture = () => {}) {
   let lineInputState = null
   const escListeners = new Set()
 
+  // iOS Safari only shows the virtual keyboard when a native focusable element
+  // is focused, and only when .focus() is called synchronously inside an
+  // activation-triggering event handler (touchend). A canvas can't trigger the
+  // keyboard, so we create a hidden off-screen <input> and focus it during
+  // lineInput mode. Not display:none — iOS won't show a keyboard for that.
+  // font-size:16px prevents iOS Safari from auto-zooming the viewport on focus.
+  const hiddenInput = document.createElement('input')
+  hiddenInput.type = 'text'
+  hiddenInput.tabIndex = -1
+  hiddenInput.setAttribute('aria-hidden', 'true')
+  hiddenInput.setAttribute('autocomplete', 'off')
+  hiddenInput.setAttribute('autocorrect', 'off')
+  hiddenInput.setAttribute('autocapitalize', 'none')
+  hiddenInput.setAttribute('spellcheck', 'false')
+  hiddenInput.style.cssText = 'position:fixed;top:-100px;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;margin:0;outline:none;'
+  document.body.appendChild(hiddenInput)
+  hiddenInput.addEventListener('keydown', onKeyDown)
+  hiddenInput.addEventListener('keyup', onKeyUp)
+
   // Fire on every user-input event. Used by callers (audio) that need to do
   // work — like AudioContext.resume() — synchronously inside the gesture
   // handler so the autoplay policy accepts it. Only called from handlers tied
@@ -66,6 +85,8 @@ export function createInput(canvas, onUserGesture = () => {}) {
       if (lineInputState) {
         const stale = lineInputState
         lineInputState = null
+        hiddenInput.blur()
+        canvas.focus({ preventScroll: true })
         stale.reject(new Error('lineInput aborted by ESC'))
       }
       for (const h of [...escListeners]) {
@@ -101,6 +122,8 @@ export function createInput(canvas, onUserGesture = () => {}) {
       const result = lineInputState.buffer
       const finish = lineInputState.resolve
       lineInputState = null
+      hiddenInput.blur()
+      canvas.focus({ preventScroll: true })
       finish(result)
       return
     }
@@ -142,7 +165,7 @@ export function createInput(canvas, onUserGesture = () => {}) {
     e.preventDefault()
     if (lineInputState === null && keyListeners.length > 0) {
       const resolvers = keyListeners.splice(0)
-      for (const r of resolvers) r(' ')
+      for (const r of resolvers) r(tapKey(t.clientX))
     }
     updateTouchKeys()
   }
@@ -159,13 +182,16 @@ export function createInput(canvas, onUserGesture = () => {}) {
   function onTouchEnd(e) {
     // touchend IS an activation-triggering input event per WHATWG, so this is
     // the canonical place to fire the user-gesture callback so audio.resume()
-    // succeeds against the autoplay policy.
+    // succeeds against the autoplay policy. For the same reason, focus() on
+    // the hidden input goes here — iOS Safari will only show the keyboard for
+    // focus() calls that are synchronous within an activation-triggering event.
     fireUserGesture()
     touchActive = false
     touchCenter = null
     touchPos = null
     tcKeys.left = tcKeys.right = tcKeys.up = tcKeys.down = false
     e.preventDefault()
+    if (lineInputState !== null) hiddenInput.focus()
   }
 
   function updateTouchKeys() {
@@ -193,11 +219,16 @@ export function createInput(canvas, onUserGesture = () => {}) {
   // tap (it fires mousedown but no touchstart on the first interaction).
   // Skipped while a lineInput buffer is collecting characters — pointer
   // input shouldn't accidentally submit the player's name.
-  function onMouseWake() {
+  function tapKey(clientX) {
+    const rect = canvas.getBoundingClientRect()
+    return clientX - rect.left < rect.width / 2 ? 'y' : 'n'
+  }
+
+  function onMouseWake(e) {
     fireUserGesture()
     if (lineInputState === null && keyListeners.length > 0) {
       const resolvers = keyListeners.splice(0)
-      for (const r of resolvers) r(' ')
+      for (const r of resolvers) r(tapKey(e.clientX))
     }
   }
   canvas.addEventListener('mousedown', onMouseWake)
@@ -234,6 +265,8 @@ export function createInput(canvas, onUserGesture = () => {}) {
     if (lineInputState) {
       const stale = lineInputState
       lineInputState = null
+      hiddenInput.blur()
+      canvas.focus({ preventScroll: true })
       stale.reject(new Error('lineInput superseded by a new call'))
     }
     return new Promise((resolve, reject) => {
@@ -253,6 +286,9 @@ export function createInput(canvas, onUserGesture = () => {}) {
     canvas.removeEventListener('keyup', onKeyUp)
     canvas.removeEventListener('mousedown', onMouseWake)
     canvas.removeEventListener('blur', onBlur)
+    hiddenInput.removeEventListener('keydown', onKeyDown)
+    hiddenInput.removeEventListener('keyup', onKeyUp)
+    hiddenInput.remove()
     if (isTouchDevice) {
       canvas.removeEventListener('touchstart', onTouchStart)
       canvas.removeEventListener('touchmove', onTouchMove)

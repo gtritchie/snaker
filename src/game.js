@@ -288,11 +288,13 @@ async function showBestScore(ctx) {
 
 async function playAgainPrompt(ctx) {
   const { screen, audio, input, tracked } = ctx
-  // BASIC lines 700-730.
+  // BASIC lines 700-730. Y/N at opposite screen edges doubles as touch tap zones:
+  // left-half tap resolves as 'y', right-half tap as 'n' (see input.js onTouchStart).
   audio.flush()
   audio.play("V15 O3 N5")
   screen.cls(0)
-  screen.printAt(0, 'ANOTHER GAME (Y/N)')
+  screen.printAt(0, 'ANOTHER GAME?')
+  screen.printAt(32, '[Y]' + ' '.repeat(26) + '[N]')
 
   while (true) {
     const k = (await tracked(input.waitForKey())).toUpperCase()

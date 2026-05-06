@@ -40,6 +40,8 @@ export function createInput(canvas, onUserGesture = () => {}) {
   // font-size:16px prevents iOS Safari from auto-zooming the viewport on focus.
   const hiddenInput = document.createElement('input')
   hiddenInput.type = 'text'
+  hiddenInput.tabIndex = -1
+  hiddenInput.setAttribute('aria-hidden', 'true')
   hiddenInput.setAttribute('autocomplete', 'off')
   hiddenInput.setAttribute('autocorrect', 'off')
   hiddenInput.setAttribute('autocapitalize', 'none')

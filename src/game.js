@@ -2,6 +2,7 @@ import { createScreen } from './screen.js'
 import { createAudio } from './audio.js'
 import { createInput } from './input.js'
 import { loadBestScore, saveBestScore } from './storage.js'
+import { createVisibilityGate, VisibilityGateDestroyedError } from './visibility.js'
 
 // ─── Tuning knobs ────────────────────────────────────────────────────────────
 // Number of full top-to-bottom descents required to win one game.
@@ -62,7 +63,23 @@ export function computeScale(container, useWidthOnly) {
 
 export function runGame(canvas, registerAudio = () => {}) {
   const screen = createScreen(canvas)
-  const audio = createAudio()
+  let audio = null
+  // Lazy audioRef: gate is constructed before audio so audio can use gate.sleep,
+  // but the gate only needs audio inside its visibilitychange handler — well after
+  // both have been wired up. See spec Section 1, "Construction ordering wrinkle".
+  const visibility = createVisibilityGate({ audioRef: () => audio })
+  // Audio's pacing routes through the gate, but fire-and-forget audio.play()
+  // call sites (step beep, playAgainPrompt beeps, celebrateRun, crashHandler)
+  // would surface gate-destroy rejections as unhandled if audio.play()'s
+  // internal sleep simply rethrew them. Swallow VisibilityGateDestroyedError
+  // here so audio.play() resolves cleanly during shutdown. Awaited callers in
+  // game.js still get correct shutdown behavior via game.js's own sleep()
+  // wrapper (which does NOT swallow), routed through the runGame outer catch.
+  const audioSleep = ms => visibility.sleep(ms).catch(err => {
+    if (err instanceof VisibilityGateDestroyedError) return
+    throw err
+  })
+  audio = createAudio({ sleep: audioSleep })
   registerAudio(audio)
   // Wire user gestures into audio.resume so the context unlocks during the
   // gesture's event handler — Chrome mobile and iOS Safari don't always honor
@@ -108,9 +125,9 @@ export function runGame(canvas, registerAudio = () => {}) {
     )
   })
 
-  const sleep = (ms) => tracked(new Promise(r => setTimeout(r, ms)))
+  const sleep = (ms) => tracked(visibility.sleep(ms))
 
-  const ctx = { screen, audio, input, tracked, sleep }
+  const ctx = { screen, audio, input, visibility, tracked, sleep }
 
   let destroyed = false
   const setDestroyed = () => { destroyed = true }
@@ -134,12 +151,13 @@ export function runGame(canvas, registerAudio = () => {}) {
           screen.setInverted(false)
           continue   // ESC pressed; restart from the pre-title
         }
+        if (err instanceof VisibilityGateDestroyedError && destroyed) return
         throw err
       }
     }
   })()
 
-  return { promise, screen, audio, input, fireAbort, escUnsub, setDestroyed }
+  return { promise, screen, audio, input, visibility, fireAbort, escUnsub, setDestroyed }
 }
 
 async function runMainFlow(ctx) {
@@ -300,9 +318,9 @@ async function playRounds(ctx) {
   let accumulatedMs = 0
 
   while (true) {
-    const runStart = performance.now()
+    const runStart = ctx.visibility.visibleNow()
     await singleDescent(ctx, { leftEdge, rightEdge, playerPos })
-    accumulatedMs += performance.now() - runStart
+    accumulatedMs += ctx.visibility.visibleNow() - runStart
     leftEdge = 1025; rightEdge = 1054; playerPos = 1039
 
     runs += 1

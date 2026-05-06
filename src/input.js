@@ -85,6 +85,7 @@ export function createInput(canvas, onUserGesture = () => {}) {
       return
     }
     if (keyListeners.length > 0) {
+      e.preventDefault()
       const resolvers = keyListeners.splice(0)
       for (const r of resolvers) r(e.key)
     }
@@ -96,6 +97,7 @@ export function createInput(canvas, onUserGesture = () => {}) {
 
   function handleLineInputKey(e) {
     if (e.key === 'Enter') {
+      e.preventDefault()
       const result = lineInputState.buffer
       const finish = lineInputState.resolve
       lineInputState = null
@@ -103,12 +105,14 @@ export function createInput(canvas, onUserGesture = () => {}) {
       return
     }
     if (e.key === 'Backspace') {
+      e.preventDefault()
       lineInputState.buffer = lineInputState.buffer.slice(0, -1)
     } else if (
       !e.ctrlKey && !e.metaKey && !e.altKey
       && e.key.length === 1
       && e.key.charCodeAt(0) >= 32 && e.key.charCodeAt(0) < 127
     ) {
+      e.preventDefault()
       // Skip when a modifier is held so shortcuts like Ctrl+C / Cmd+R don't
       // pollute the buffer with the underlying character key.
       if (lineInputState.buffer.length < lineInputState.maxLength) {

@@ -165,8 +165,7 @@ export function createInput(canvas, onUserGesture = () => {}) {
     e.preventDefault()
     if (lineInputState === null && keyListeners.length > 0) {
       const resolvers = keyListeners.splice(0)
-      const key = touchCenter.x < rect.width / 2 ? 'y' : 'n'
-      for (const r of resolvers) r(key)
+      for (const r of resolvers) r(tapKey(t.clientX))
     }
     updateTouchKeys()
   }
@@ -220,11 +219,16 @@ export function createInput(canvas, onUserGesture = () => {}) {
   // tap (it fires mousedown but no touchstart on the first interaction).
   // Skipped while a lineInput buffer is collecting characters — pointer
   // input shouldn't accidentally submit the player's name.
-  function onMouseWake() {
+  function tapKey(clientX) {
+    const rect = canvas.getBoundingClientRect()
+    return clientX - rect.left < rect.width / 2 ? 'y' : 'n'
+  }
+
+  function onMouseWake(e) {
     fireUserGesture()
     if (lineInputState === null && keyListeners.length > 0) {
       const resolvers = keyListeners.splice(0)
-      for (const r of resolvers) r(' ')
+      for (const r of resolvers) r(tapKey(e.clientX))
     }
   }
   canvas.addEventListener('mousedown', onMouseWake)

@@ -47,7 +47,12 @@ export function createInput(canvas, onUserGesture = () => {}) {
   hiddenInput.setAttribute('autocapitalize', 'none')
   hiddenInput.setAttribute('spellcheck', 'false')
   hiddenInput.style.cssText = 'position:fixed;top:-100px;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;margin:0;outline:none;'
-  document.body.appendChild(hiddenInput)
+  // Deliberately NOT appended to document.body here. On iOS Safari, the
+  // presence of any text input in the DOM — even off-screen — interferes with
+  // the user-gesture → AudioContext.resume() handshake on the first touchend,
+  // silencing all audio. The element is only attached for the duration of a
+  // lineInput() call and removed when that promise settles. Every appendChild
+  // below has a matching remove(); see destroy() for the safety-net detach.
   hiddenInput.addEventListener('keydown', onKeyDown)
   hiddenInput.addEventListener('keyup', onKeyUp)
 
@@ -86,6 +91,7 @@ export function createInput(canvas, onUserGesture = () => {}) {
         const stale = lineInputState
         lineInputState = null
         hiddenInput.blur()
+        hiddenInput.remove()
         canvas.focus({ preventScroll: true })
         stale.reject(new Error('lineInput aborted by ESC'))
       }
@@ -123,6 +129,7 @@ export function createInput(canvas, onUserGesture = () => {}) {
       const finish = lineInputState.resolve
       lineInputState = null
       hiddenInput.blur()
+      hiddenInput.remove()
       canvas.focus({ preventScroll: true })
       finish(result)
       return
@@ -266,9 +273,11 @@ export function createInput(canvas, onUserGesture = () => {}) {
       const stale = lineInputState
       lineInputState = null
       hiddenInput.blur()
+      hiddenInput.remove()
       canvas.focus({ preventScroll: true })
       stale.reject(new Error('lineInput superseded by a new call'))
     }
+    document.body.appendChild(hiddenInput)
     return new Promise((resolve, reject) => {
       lineInputState = { resolve, reject, render, buffer: '', maxLength }
       render('')

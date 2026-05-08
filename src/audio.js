@@ -180,14 +180,9 @@ export function createAudio(opts = {}) {
                          // oscillators on a suspended context that would all fire on resume
   let audioDisabled = false  // set if AudioContext can't be constructed; play() then
                              // becomes a no-op aside from cross-call PLAY state updates
-  let unlockAttempted = false  // set ONLY when waitForRunning() exits via timeout (not
-                               // via a successful 'running' transition) so the remaining
-                               // 31 awaited play() calls in setup()'s border loop don't
-                               // each burn 1 s when the AudioContext is wedged in
-                               // 'suspended' (iOS 26 audio session quirk). Successful
-                               // delayed unlocks must NOT set the flag — otherwise a
-                               // later legitimate suspend/resume cycle would short-circuit
-                               // and drop notes that fire during the resume transition.
+  let unlockAttempted = false  // set ONLY by waitForRunning()'s 1 s timeout, never by a
+                               // successful 'running' transition. See waitForRunning()
+                               // for the iOS 26 quirk this guards against.
 
   // Cross-PLAY-call running state. Mirrors CoCo PLAY's stateful behavior.
   let runningTempo = 60
@@ -259,13 +254,19 @@ export function createAudio(opts = {}) {
   // Resolves immediately if ac is already running. Times out after 1 s so we
   // can't hang if the page never gets a user gesture.
   //
-  // After the first call exits via timeout (i.e. the context never reached
-  // 'running' within 1 s), unlockAttempted is set and subsequent calls
-  // short-circuit. Without this, setup()'s 32 awaited play() calls each burn
-  // a full second on a wedged AudioContext (iOS 26 audio session quirk),
-  // delaying the border draw by ~32 s. The flag is set only on the timeout
-  // branch, so a delayed-but-successful unlock leaves it false and future
-  // suspend/resume cycles still get their 1 s grace period.
+  // On the iOS 26 quirk path, a freshly-created AudioContext stays in
+  // 'suspended' indefinitely even after ac.resume() resolves. Without
+  // unlockAttempted, every awaited play() call (TITLE_MUSIC plus the 32
+  // calls in setup()'s border loop) would burn its own 1 s timeout — pre-
+  // fix, the border draw was held off for ~32 s. The first timeout latches
+  // the flag and emits a one-shot warn (matching the audioDisabled
+  // pattern); all subsequent calls short-circuit. The flag is set only on
+  // the timeout branch, so an unlock that completes within 1 s leaves it
+  // false and future suspend/resume cycles on a healthy context still get
+  // their 1 s grace period. Once latched, the flag persists for the
+  // lifetime of this createAudio() instance — if iOS later recovers the
+  // context, plays during the resume transition skip-schedule. Accepted
+  // trade-off: the iOS 26 wedge does not recover in practice.
   function waitForRunning() {
     if (!ac || ac.state === 'running') return Promise.resolve()
     if (unlockAttempted) return Promise.resolve()
@@ -277,7 +278,14 @@ export function createAudio(opts = {}) {
       }
       const onChange = () => { if (ac.state === 'running') cleanup() }
       ac.addEventListener('statechange', onChange)
-      const timer = setTimeout(() => { unlockAttempted = true; cleanup() }, 1000)
+      const timer = setTimeout(() => {
+        unlockAttempted = true
+        console.warn(
+          `audio: AudioContext did not reach 'running' within 1 s ` +
+          `(state=${ac.state}); subsequent play() calls will skip scheduling`
+        )
+        cleanup()
+      }, 1000)
     })
   }
 

@@ -180,6 +180,10 @@ export function createAudio(opts = {}) {
                          // oscillators on a suspended context that would all fire on resume
   let audioDisabled = false  // set if AudioContext can't be constructed; play() then
                              // becomes a no-op aside from cross-call PLAY state updates
+  let unlockAttempted = false  // set after the first waitForRunning() timeout so the
+                               // remaining 31 awaited play() calls in setup()'s border
+                               // loop don't each burn 1 s when the AudioContext is
+                               // wedged in 'suspended' (iOS 26 audio session quirk)
 
   // Cross-PLAY-call running state. Mirrors CoCo PLAY's stateful behavior.
   let runningTempo = 60
@@ -250,10 +254,18 @@ export function createAudio(opts = {}) {
   // (after a user gesture) and the autoplay-policy unlock actually completing.
   // Resolves immediately if ac is already running. Times out after 1 s so we
   // can't hang if the page never gets a user gesture.
+  //
+  // After the first call exits via timeout (i.e. the context never reached
+  // 'running' within 1 s), unlockAttempted is set and subsequent calls
+  // short-circuit. Without this, setup()'s 32 awaited play() calls each burn
+  // a full second on a wedged AudioContext (iOS 26 audio session quirk),
+  // delaying the border draw by ~32 s.
   function waitForRunning() {
     if (!ac || ac.state === 'running') return Promise.resolve()
+    if (unlockAttempted) return Promise.resolve()
     return new Promise(resolve => {
       const cleanup = () => {
+        unlockAttempted = true
         ac.removeEventListener('statechange', onChange)
         clearTimeout(timer)
         resolve()

@@ -180,10 +180,14 @@ export function createAudio(opts = {}) {
                          // oscillators on a suspended context that would all fire on resume
   let audioDisabled = false  // set if AudioContext can't be constructed; play() then
                              // becomes a no-op aside from cross-call PLAY state updates
-  let unlockAttempted = false  // set after the first waitForRunning() timeout so the
-                               // remaining 31 awaited play() calls in setup()'s border
-                               // loop don't each burn 1 s when the AudioContext is
-                               // wedged in 'suspended' (iOS 26 audio session quirk)
+  let unlockAttempted = false  // set ONLY when waitForRunning() exits via timeout (not
+                               // via a successful 'running' transition) so the remaining
+                               // 31 awaited play() calls in setup()'s border loop don't
+                               // each burn 1 s when the AudioContext is wedged in
+                               // 'suspended' (iOS 26 audio session quirk). Successful
+                               // delayed unlocks must NOT set the flag — otherwise a
+                               // later legitimate suspend/resume cycle would short-circuit
+                               // and drop notes that fire during the resume transition.
 
   // Cross-PLAY-call running state. Mirrors CoCo PLAY's stateful behavior.
   let runningTempo = 60
@@ -259,20 +263,21 @@ export function createAudio(opts = {}) {
   // 'running' within 1 s), unlockAttempted is set and subsequent calls
   // short-circuit. Without this, setup()'s 32 awaited play() calls each burn
   // a full second on a wedged AudioContext (iOS 26 audio session quirk),
-  // delaying the border draw by ~32 s.
+  // delaying the border draw by ~32 s. The flag is set only on the timeout
+  // branch, so a delayed-but-successful unlock leaves it false and future
+  // suspend/resume cycles still get their 1 s grace period.
   function waitForRunning() {
     if (!ac || ac.state === 'running') return Promise.resolve()
     if (unlockAttempted) return Promise.resolve()
     return new Promise(resolve => {
       const cleanup = () => {
-        unlockAttempted = true
         ac.removeEventListener('statechange', onChange)
         clearTimeout(timer)
         resolve()
       }
       const onChange = () => { if (ac.state === 'running') cleanup() }
       ac.addEventListener('statechange', onChange)
-      const timer = setTimeout(cleanup, 1000)
+      const timer = setTimeout(() => { unlockAttempted = true; cleanup() }, 1000)
     })
   }
 

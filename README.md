@@ -4,6 +4,8 @@ In early 1983 I wrote this game for the TRS-80 Color Computer, and submitted it 
 
 Submission was via mailing a cassette tape with the source code. It was accepted and [appeared in the January 1984 issue](https://archive.org/details/rainbowmagazine-1984-01/page/n171/mode/2up). I believe I was paid something on the order of $25. American!
 
+**Play it in your browser:** <https://gtritchie.github.io/snaker/>
+
 The original source is in [snaker.bas](https://github.com/gtritchie/snaker/blob/main/src/snaker.bas).
 
 [GAMEPLAY.md](https://github.com/gtritchie/snaker/blob/main/GAMEPLAY.md) explains how to play the (ported) game.

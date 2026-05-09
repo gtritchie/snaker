@@ -180,6 +180,9 @@ export function createAudio(opts = {}) {
                          // oscillators on a suspended context that would all fire on resume
   let audioDisabled = false  // set if AudioContext can't be constructed; play() then
                              // becomes a no-op aside from cross-call PLAY state updates
+  let unlockAttempted = false  // set ONLY by waitForRunning()'s 1 s timeout, never by a
+                               // successful 'running' transition. See waitForRunning()
+                               // for the iOS 26 quirk this guards against.
 
   // Cross-PLAY-call running state. Mirrors CoCo PLAY's stateful behavior.
   let runningTempo = 60
@@ -250,8 +253,23 @@ export function createAudio(opts = {}) {
   // (after a user gesture) and the autoplay-policy unlock actually completing.
   // Resolves immediately if ac is already running. Times out after 1 s so we
   // can't hang if the page never gets a user gesture.
+  //
+  // On the iOS 26 quirk path, a freshly-created AudioContext stays in
+  // 'suspended' indefinitely even after ac.resume() resolves. Without
+  // unlockAttempted, every awaited play() call (TITLE_MUSIC plus the 32
+  // calls in setup()'s border loop) would burn its own 1 s timeout — pre-
+  // fix, the border draw was held off for ~32 s. The first timeout latches
+  // the flag and emits a one-shot warn (matching the audioDisabled
+  // pattern); all subsequent calls short-circuit. The flag is set only on
+  // the timeout branch, so an unlock that completes within 1 s leaves it
+  // false and future suspend/resume cycles on a healthy context still get
+  // their 1 s grace period. Once latched, the flag persists for the
+  // lifetime of this createAudio() instance — if iOS later recovers the
+  // context, plays during the resume transition skip-schedule. Accepted
+  // trade-off: the iOS 26 wedge does not recover in practice.
   function waitForRunning() {
     if (!ac || ac.state === 'running') return Promise.resolve()
+    if (unlockAttempted) return Promise.resolve()
     return new Promise(resolve => {
       const cleanup = () => {
         ac.removeEventListener('statechange', onChange)
@@ -260,7 +278,14 @@ export function createAudio(opts = {}) {
       }
       const onChange = () => { if (ac.state === 'running') cleanup() }
       ac.addEventListener('statechange', onChange)
-      const timer = setTimeout(cleanup, 1000)
+      const timer = setTimeout(() => {
+        unlockAttempted = true
+        console.warn(
+          `audio: AudioContext did not reach 'running' within 1 s ` +
+          `(state=${ac.state}); subsequent play() calls will skip scheduling`
+        )
+        cleanup()
+      }, 1000)
     })
   }
 

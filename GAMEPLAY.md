@@ -5,18 +5,6 @@ you from the bottom. Each successful top-to-bottom descent counts as one run;
 finish three runs to win and your elapsed time becomes your score (lower is
 better). Hitting a car bumps you back up one row and resumes the run.
 
-## Starting a game
-
-1. Serve the checkout over HTTP. The app loads ES modules, which most browsers
-   refuse to import from a `file://` URL. From the repo root run
-   `python3 -m http.server 8000` (or any equivalent static server) and open
-   `http://localhost:8000/`. Visiting a hosted deploy works the same way.
-2. The pre-title screen reads `PRESS ANY KEY TO RUN THE PROGRAM`. Press any
-   key (or tap the canvas on a touch device). The Bublitchki title melody
-   plays in full, then `<<press ANY key TO START>>` appears.
-3. Press any key again. The walls draw in with stepped tones, and the snake
-   starts at the top of the highway.
-
 ## Controls
 
 ### Keyboard

@@ -35,9 +35,7 @@ The canvas itself is a virtual joystick:
    register as input.
 4. Lift your finger to release all directions. Touch again to re-center.
 
-A single tap also advances the pre-title and title prompts. Steering and
-speed during gameplay work entirely from touch — but the name-entry and
-`ANOTHER GAME (Y/N)` prompts still require a keyboard.
+A single tap also advances the pre-title and title prompts.
 
 ## Prompts during a game
 
